@@ -15,11 +15,29 @@ const CONFIG = {
  * @returns {Date|null} The earliest date found, or null if no dates found
  */
 function extractEarliestDate(cleanedResults) {
+  // Validate input
+  if (!cleanedResults || !Array.isArray(cleanedResults)) {
+    console.warn('extractEarliestDate: cleanedResults is not a valid array:', cleanedResults);
+    return null;
+  }
+  
   const dates = [];
   
   for (const item of cleanedResults) {
+    // Validate item structure
+    if (!item || typeof item !== 'object') {
+      console.warn('extractEarliestDate: Invalid item in cleanedResults:', item);
+      continue;
+    }
+    
     if (item.type === 'content') {
       const content = item.content;
+      
+      // Validate content is a string
+      if (typeof content !== 'string') {
+        console.warn('extractEarliestDate: content is not a string:', content);
+        continue;
+      }
       
       // Look for various date formats
       const datePatterns = [
@@ -143,6 +161,7 @@ function onOpen() {
     .addItem('Test Configuration', 'testConfiguration')
     .addItem('Test Gemini API', 'testGeminiAPI')
     .addItem('Test Year Parsing', 'testYearParsing')
+    .addItem('Test Date Extraction', 'testDateExtraction')
     .addToUi();
 }
 
@@ -182,6 +201,13 @@ async function processAllFiles() {
         try {
           logProgress(logSheet, `Parsing file for date sorting: ${fileData.name}`);
           const parsedData = parseMarkdownFile(fileData.file, logSheet);
+          
+          // Validate parsed data structure
+          if (!parsedData || typeof parsedData !== 'object' || !parsedData.cleanedResults) {
+            logProgress(logSheet, `⚠️ WARNING: Invalid parsed data structure for ${fileData.name}`);
+            throw new Error(`Invalid parsed data structure for ${fileData.name}`);
+          }
+          
           const earliestDate = extractEarliestDate(parsedData.cleanedResults);
           
           parsedFiles.push({
@@ -888,6 +914,15 @@ function parseMarkdownFile(file, logSheet) {
     
     logProgress(logSheet, `Parsing Dragon Gate results file: ${fileName}`);
     
+    // Validate file content
+    if (typeof content !== 'string') {
+      throw new Error(`File content is not a string: ${typeof content}`);
+    }
+    
+    if (content.length === 0) {
+      logProgress(logSheet, `⚠️ WARNING: File ${fileName} is empty`);
+    }
+    
     let seriesName = '';
     let contentBody = content;
     
@@ -918,6 +953,8 @@ function parseMarkdownFile(file, logSheet) {
     
     const lines = contentBody.split('\n');
     const cleanedResults = [];
+    
+    logProgress(logSheet, `Debug - Processing ${lines.length} lines from ${fileName}`);
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -956,11 +993,16 @@ function parseMarkdownFile(file, logSheet) {
     
     logProgress(logSheet, `Parsed ${cleanedResults.length} content blocks from ${fileName}`);
     
-    return {
+    const result = {
       cleanedResults: cleanedResults,
       seriesName: seriesName,
       originalContent: contentBody
     };
+    
+    // Debug logging
+    logProgress(logSheet, `Debug - returning parsed data structure: cleanedResults is ${Array.isArray(cleanedResults) ? 'array' : typeof cleanedResults} with ${cleanedResults ? cleanedResults.length : 'null'} items`);
+    
+    return result;
     
   } catch (error) {
     logProgress(logSheet, `ERROR parsing Dragon Gate file ${file.getName()}: ${error.message}`);
@@ -1132,4 +1174,32 @@ async function testGeminiAPI() {
     console.error('❌ Gemini API test failed:', error.message);
     throw error;
   }
+}
+
+/**
+ * Debug function to test date extraction
+ */
+function testDateExtraction() {
+  console.log('Testing date extraction...');
+  
+  // Test with valid data
+  const testData = [
+    { type: 'content', content: '4/26/2001 Gifu Industrial Hall 1050 Attendance' },
+    { type: 'content', content: 'May 12th, 2001 Tokyo, Korakuen Hall' },
+    { type: 'header', content: 'Test Header', level: 2 }
+  ];
+  
+  console.log('Test data:', testData);
+  const result = extractEarliestDate(testData);
+  console.log('Extracted date:', result);
+  
+  // Test with invalid data
+  console.log('Testing with null...');
+  const nullResult = extractEarliestDate(null);
+  console.log('Null result:', nullResult);
+  
+  // Test with non-array
+  console.log('Testing with string...');
+  const stringResult = extractEarliestDate('not an array');
+  console.log('String result:', stringResult);
 }
