@@ -10,20 +10,138 @@ const CONFIG = {
 };
 
 /**
- * Extracts the earliest date from parsed wrestling results for chronological sorting
- * @param {Array} cleanedResults - Parsed content from markdown file (prose already filtered out)
+ * Safe wrapper for extractEarliestDate that handles any type of input
+ * @param {*} input - Any input that should be parsed for dates
  * @returns {Date|null} The earliest date found, or null if no dates found
  */
-function extractEarliestDate(cleanedResults) {
-  // Validate input
-  if (!cleanedResults || !Array.isArray(cleanedResults)) {
-    console.warn('extractEarliestDate: cleanedResults is not a valid array:', cleanedResults);
+function extractEarliestDateSafe(input) {
+  try {
+    return extractEarliestDateNew(input);
+  } catch (error) {
+    console.error('Error in extractEarliestDate:', error.message);
+    console.error('Input was:', typeof input, input);
+    return null;
+  }
+}
+
+/**
+ * New version of date extraction function with robust error handling
+ * @param {*} cleanedResults - Input to parse for dates
+ * @returns {Date|null} The earliest date found, or null if no dates found
+ */
+function extractEarliestDateNew(cleanedResults) {
+  console.log('extractEarliestDateNew called with:', typeof cleanedResults);
+  
+  // Handle completely invalid inputs
+  if (cleanedResults === null || cleanedResults === undefined) {
+    console.warn('Input is null or undefined');
+    return null;
+  }
+  
+  // Convert to array if it's not already
+  let dataArray;
+  if (Array.isArray(cleanedResults)) {
+    dataArray = cleanedResults;
+  } else if (typeof cleanedResults === 'object' && cleanedResults.cleanedResults) {
+    // Handle case where the entire parsed object was passed
+    dataArray = cleanedResults.cleanedResults;
+  } else {
+    console.warn('Input is not an array or valid object:', typeof cleanedResults);
+    return null;
+  }
+  
+  if (!Array.isArray(dataArray)) {
+    console.warn('dataArray is still not an array:', typeof dataArray);
     return null;
   }
   
   const dates = [];
   
-  for (const item of cleanedResults) {
+  for (let i = 0; i < dataArray.length; i++) {
+    const item = dataArray[i];
+    
+    if (!item || typeof item !== 'object' || item.type !== 'content') {
+      continue;
+    }
+    
+    const content = item.content;
+    if (typeof content !== 'string') {
+      continue;
+    }
+    
+    // Simple date patterns for testing
+    const dateMatches = [
+      content.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/),
+      content.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(st|nd|rd|th)?,?\s+(\d{4})/i)
+    ];
+    
+    for (let j = 0; j < dateMatches.length; j++) {
+      const match = dateMatches[j];
+      if (match) {
+        try {
+          let date;
+          if (j === 0) {
+            // MM/DD/YYYY format
+            const month = parseInt(match[1], 10) - 1;
+            const day = parseInt(match[2], 10);
+            const year = parseInt(match[3], 10);
+            date = new Date(year, month, day);
+          } else {
+            // Month name format
+            const months = {
+              'january': 0, 'february': 1, 'march': 2, 'april': 3,
+              'may': 4, 'june': 5, 'july': 6, 'august': 7,
+              'september': 8, 'october': 9, 'november': 10, 'december': 11
+            };
+            const month = months[match[1].toLowerCase()];
+            const day = parseInt(match[2], 10);
+            const year = parseInt(match[4], 10);
+            date = new Date(year, month, day);
+          }
+          
+          if (!isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 2100) {
+            dates.push(date);
+          }
+        } catch (error) {
+          console.warn('Date parsing error:', error.message);
+        }
+        break; // Only process first match per content item
+      }
+    }
+  }
+  
+  if (dates.length > 0) {
+    dates.sort((a, b) => a - b);
+    return dates[0];
+  }
+  
+  return null;
+}
+
+/**
+ * Extracts the earliest date from parsed wrestling results for chronological sorting
+ * @param {Array} cleanedResults - Parsed content from markdown file (prose already filtered out)
+ * @returns {Date|null} The earliest date found, or null if no dates found
+ */
+function extractEarliestDate(cleanedResults) {
+  console.log('extractEarliestDate called with:', typeof cleanedResults, cleanedResults);
+  
+  // Validate input - using more defensive coding
+  if (cleanedResults === null || cleanedResults === undefined) {
+    console.warn('extractEarliestDate: cleanedResults is null or undefined');
+    return null;
+  }
+  
+  if (!Array.isArray(cleanedResults)) {
+    console.warn('extractEarliestDate: cleanedResults is not an array, type:', typeof cleanedResults, 'value:', cleanedResults);
+    return null;
+  }
+  
+  const dates = [];
+  
+    // Use traditional for loop instead of for...of to avoid iteration issues
+  for (let i = 0; i < cleanedResults.length; i++) {
+    const item = cleanedResults[i];
     // Validate item structure
     if (!item || typeof item !== 'object') {
       console.warn('extractEarliestDate: Invalid item in cleanedResults:', item);
@@ -59,7 +177,8 @@ function extractEarliestDate(cleanedResults) {
         }
       ];
       
-      for (const { pattern, type } of datePatterns) {
+      for (let j = 0; j < datePatterns.length; j++) {
+        const { pattern, type } = datePatterns[j];
         const match = content.match(pattern);
         if (match) {
           let date;
@@ -208,7 +327,7 @@ async function processAllFiles() {
             throw new Error(`Invalid parsed data structure for ${fileData.name}`);
           }
           
-          const earliestDate = extractEarliestDate(parsedData.cleanedResults);
+          const earliestDate = extractEarliestDateSafe(parsedData.cleanedResults);
           
           parsedFiles.push({
             fileData: fileData,
