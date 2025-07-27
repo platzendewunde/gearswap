@@ -281,6 +281,7 @@ function onOpen() {
     .addItem('Test Gemini API', 'testGeminiAPI')
     .addItem('Test Year Parsing', 'testYearParsing')
     .addItem('Test Date Extraction', 'testDateExtraction')
+    .addItem('Test Special Results', 'testSpecialResultFormatting')
     .addToUi();
 }
 
@@ -811,7 +812,9 @@ IMPORTANT:
    - Only ONE wrestler per team gets ❌ (the one who took the loss/pin)
    - Other team members have NO symbols
    - For No Contest: Use ▲ for one wrestler per team (the involved participants)
-   - For Time Limit Draw/Double Pinfall: Use △ for all participants
+   - For Double Count Out: Use ▲ for one wrestler per team (the involved participants)
+   - For Time Limit Draw: Use △ for all participants
+   - For Double Pinfall: Use △ for all participants
 10. "vs" on its own line between teams (replace any scores like (3-2) or (5-4) with "vs")
 11. Match time and finish move in parentheses: (time finish)
 12. For championships: ⭐︎ symbol for title defense notes
@@ -829,9 +832,14 @@ IMPORTANT:
 
 **SPECIAL RESULTS:**
 - No Contest: Use ▲ for one wrestler per team (the involved participants)
-- Time Limit Draw/Double Pinfall: Use △ for all participants  
+  Example: Genki Horiguchi▲ vs Chocoflake K-ICHI▲ (7:24 No Contest)
+- Double Count Out: Use ▲ for one wrestler per team (the involved participants)  
+  Example: Genki Horiguchi▲ vs Chocoflake K-ICHI▲ (7:24 Double Count Out)
+- Time Limit Draw: Use △ for all participants
+  Example: Genki Horiguchi△ vs Chocoflake K-ICHI△ (30:00 Time Limit Draw)
+- Double Pinfall: Use △ for all participants
+  Example: Genki Horiguchi△ vs Chocoflake K-ICHI△ (15:30 Double Pinfall)
 - Disqualification: Winner gets ⭕️, loser gets ❌
-- Double Count Out: Use ▲ for both participants
 
 **WRESTLER NAME FORMATTING:**
 - Keep exact spelling: YAMATO, BxB Hulk, Strong Machine J, etc.
@@ -847,6 +855,18 @@ EVENT TO FORMAT: ${seriesName}
 
 RAW CONTENT:
 ${contentText}
+
+**CRITICAL SPECIAL RESULT FORMATTING RULES:**
+- ▲ symbol is ONLY for: No Contest, Double Count Out, Disqualification (loser)
+- △ symbol is ONLY for: Time Limit Draw, Double Pinfall, Draw
+- ⭕️ symbol is ONLY for: Actual winners (pins, submissions, etc.)
+- ❌ symbol is ONLY for: Actual losers (pinned, submitted, etc.)
+
+**DO NOT CONFUSE THESE SYMBOLS:**
+- If it says "No Contest" anywhere → use ▲ 
+- If it says "Double Count Out" anywhere → use ▲
+- If it says "Time Limit Draw" anywhere → use △
+- If it says "Double Pinfall" anywhere → use △
 
 CRITICAL: Before formatting, sort all shows/events by date chronologically (earliest first). Return the content formatted exactly like the Dragon Gate style shown above. Preserve all wrestler names, match times, and finish moves accurately. Handle elimination matches and 2/3 falls with the ❶❷❸ format. Replace any scores between teams with "vs". Do not add commentary or analysis.`;
     
@@ -992,8 +1012,8 @@ function formatDragonGateFallback(cleanedResults, seriesName) {
         } else if (content.includes('⭐︎') || content.includes('★')) {
           // Championship notes
           formatted.push(content);
-        } else if (content.includes('No Contest')) {
-          // No Contest - mark one per team with ▲
+        } else if (content.includes('No Contest') || content.includes('Double Count Out')) {
+          // No Contest or Double Count Out - mark one per team with ▲
           formatted.push(content);
         } else if (content.includes('Time Limit Draw') || 
                    content.includes('Double Pinfall') ||
@@ -1321,4 +1341,49 @@ function testDateExtraction() {
   console.log('Testing with string...');
   const stringResult = extractEarliestDate('not an array');
   console.log('String result:', stringResult);
+}
+
+/**
+ * Test function to verify special result formatting
+ */
+async function testSpecialResultFormatting() {
+  console.log('Testing special result formatting...');
+  
+  const logSheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+  
+  const testData = [
+    { type: 'content', content: '② Singles Match' },
+    { type: 'content', content: 'Genki Horiguchi' },
+    { type: 'content', content: 'vs' },
+    { type: 'content', content: 'Chocoflake K-ICHI' },
+    { type: 'content', content: '(7:24 Double Count Out)' },
+    { type: 'separator', content: '——' },
+    { type: 'content', content: '③ Singles Match' },
+    { type: 'content', content: 'Ryo Saito' },
+    { type: 'content', content: 'vs' },
+    { type: 'content', content: 'Masato Yoshino' },
+    { type: 'content', content: '(30:00 Time Limit Draw)' }
+  ];
+  
+  try {
+    const result = await formatWithGeminiAPI(testData, 'Special Results Test', logSheet);
+    console.log('Formatted result:');
+    console.log(result);
+    
+    // Check for correct symbols
+    if (result.includes('▲') && result.includes('Double Count Out')) {
+      console.log('✅ Double Count Out correctly formatted with ▲');
+    } else {
+      console.log('❌ Double Count Out formatting issue');
+    }
+    
+    if (result.includes('△') && result.includes('Time Limit Draw')) {
+      console.log('✅ Time Limit Draw correctly formatted with △');
+    } else {
+      console.log('❌ Time Limit Draw formatting issue');
+    }
+    
+  } catch (error) {
+    console.error('❌ Test failed:', error.message);
+  }
 }
