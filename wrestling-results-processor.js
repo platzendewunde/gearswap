@@ -7,8 +7,6 @@
 const CONFIG = {
   SOURCE_FOLDER_ID: '19FHfHxEwklAIpJjt81mwIV36H1uSbe_X', // ❗ Replace with your Folder ID
   LOG_SHEET_ID: '1TQ-39ceCBrgGr1A7_AyD_PVD3qaJjQKN60rU0jRmccY',       // ❗ Replace with your Google Sheet ID
-  PROCESSED_FILES_SHEET: 'ProcessedFiles', // Sheet name for tracking processed files
-  OUTPUT_FOLDER_ID: null, // Optional: Set folder ID where yearly documents should be created
 };
 
 /**
@@ -279,10 +277,6 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('Wrestling Results Processor')
     .addItem('Process All Files', 'processAllFiles')
-    .addSeparator()
-    .addItem('Show Processing Stats', 'showProcessingStats')
-    .addItem('Reset File Tracking', 'resetProcessedFilesTracking')
-    .addSeparator()
     .addItem('Test Configuration', 'testConfiguration')
     .addItem('Test Gemini API', 'testGeminiAPI')
     .addItem('Test Year Parsing', 'testYearParsing')
@@ -308,10 +302,6 @@ async function processAllFiles() {
     
     logProgress(logSheet, 'Configuration validated successfully');
     
-    // Initialize processed files tracking
-    const processedSheet = getProcessedFilesSheet();
-    logProgress(logSheet, 'Initialized file tracking system');
-    
     // Get all .md files and group them by year
     const filesByYear = getMarkdownFilesByYear(CONFIG.SOURCE_FOLDER_ID, logSheet);
     logProgress(logSheet, `Found ${Object.keys(filesByYear).length} years of data`);
@@ -321,30 +311,13 @@ async function processAllFiles() {
       logProgress(logSheet, `\n=== PROCESSING YEAR ${year} ===`);
       
       const yearFiles = filesByYear[year];
+      const yearlyDoc = createYearlyDocument(year, yearFiles.length, logSheet);
       
-      // Filter out already processed files
-      const unprocessedFiles = yearFiles.filter(fileData => {
-        const isProcessed = isFileProcessed(fileData.id, processedSheet);
-        if (isProcessed) {
-          logProgress(logSheet, `⏭️ SKIPPING already processed file: ${fileData.name}`);
-        }
-        return !isProcessed;
-      });
+      logProgress(logSheet, `Created yearly document for ${year}: ${yearlyDoc.getName()}`);
       
-      if (unprocessedFiles.length === 0) {
-        logProgress(logSheet, `✅ All files for ${year} already processed - skipping year`);
-        continue;
-      }
-      
-      logProgress(logSheet, `📂 Processing ${unprocessedFiles.length} unprocessed files out of ${yearFiles.length} total for ${year}`);
-      
-      const yearlyDoc = getOrCreateYearlyDocument(year, unprocessedFiles.length, logSheet, processedSheet);
-      
-      logProgress(logSheet, `Document ready for ${year}: ${yearlyDoc.getName()}`);
-      
-      // Parse all unprocessed files first to get their dates for chronological sorting
+      // Parse all files first to get their dates for chronological sorting
       const parsedFiles = [];
-      for (const fileData of unprocessedFiles) {
+      for (const fileData of yearFiles) {
         try {
           logProgress(logSheet, `Parsing file for date sorting: ${fileData.name}`);
           const parsedData = parseMarkdownFile(fileData.file, logSheet);
@@ -400,11 +373,8 @@ async function processAllFiles() {
           // Append to yearly document (without duplicate series name)
           appendSeriesToDocument(yearlyDoc, finalParsedData.seriesName, formattedContent, logSheet);
           
-          // Mark file as processed
-          markFileAsProcessed(fileData.id, fileData.name, year, yearlyDoc.getId(), processedSheet);
-          
           processedCount++;
-          logProgress(logSheet, `✅ Successfully processed ${fileData.name} (${processedCount}/${unprocessedFiles.length})`);
+          logProgress(logSheet, `✅ Successfully processed ${fileData.name} (${processedCount}/${yearFiles.length})`);
           
         } catch (fileError) {
           logProgress(logSheet, `❌ FAILED to process ${fileInfo.fileData.name}: ${fileError.message}`);
@@ -414,9 +384,9 @@ async function processAllFiles() {
       
       // Finalize the yearly document
       finalizeYearlyDocument(yearlyDoc, processedCount, logSheet);
-      logProgress(logSheet, `📄 Completed ${year} document with ${processedCount}/${unprocessedFiles.length} new files processed`);
+      logProgress(logSheet, `📄 Completed ${year} document with ${processedCount}/${yearFiles.length} files processed`);
       
-      logProgress(logSheet, `Completed processing ${year} (${processedCount} new files, ${yearFiles.length - unprocessedFiles.length} already processed)`);
+      logProgress(logSheet, `Completed processing ${year} (${yearFiles.length} files)`);
     }
     
     logProgress(logSheet, 'Processing workflow partially implemented - file discovery complete');
@@ -445,105 +415,7 @@ function getApiKey() {
   return apiKey;
 }
 
-/**
- * Gets or creates the processed files tracking sheet
- * @returns {GoogleAppsScript.Spreadsheet.Sheet} The processed files sheet
- */
-function getProcessedFilesSheet() {
-  const spreadsheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID);
-  
-  let sheet = spreadsheet.getSheetByName(CONFIG.PROCESSED_FILES_SHEET);
-  if (!sheet) {
-    // Create the sheet if it doesn't exist
-    sheet = spreadsheet.insertSheet(CONFIG.PROCESSED_FILES_SHEET);
-    
-    // Add headers
-    sheet.getRange(1, 1, 1, 6).setValues([[
-      'File ID', 'File Name', 'Year', 'Processed Date', 'Document ID', 'Status'
-    ]]);
-    
-    // Format headers
-    const headerRange = sheet.getRange(1, 1, 1, 6);
-    headerRange.setFontWeight('bold');
-    headerRange.setBackground('#4285f4');
-    headerRange.setFontColor('white');
-  }
-  
-  return sheet;
-}
 
-/**
- * Checks if a file has already been processed
- * @param {string} fileId - The Google Drive file ID
- * @param {GoogleAppsScript.Spreadsheet.Sheet} processedSheet - The processed files sheet
- * @returns {boolean} True if the file has been processed
- */
-function isFileProcessed(fileId, processedSheet) {
-  const data = processedSheet.getDataRange().getValues();
-  
-  for (let i = 1; i < data.length; i++) { // Skip header row
-    if (data[i][0] === fileId && data[i][5] === 'Completed') {
-      return true;
-    }
-  }
-  
-  return false;
-}
-
-/**
- * Marks a file as processed in the tracking sheet
- * @param {string} fileId - The Google Drive file ID
- * @param {string} fileName - The file name
- * @param {string} year - The year the file belongs to
- * @param {string} documentId - The ID of the created yearly document
- * @param {GoogleAppsScript.Spreadsheet.Sheet} processedSheet - The processed files sheet
- */
-function markFileAsProcessed(fileId, fileName, year, documentId, processedSheet) {
-  processedSheet.appendRow([
-    fileId,
-    fileName,
-    year,
-    new Date(),
-    documentId,
-    'Completed'
-  ]);
-}
-
-/**
- * Gets existing yearly document or creates a new one
- * @param {number} year - The year for the document
- * @param {number} fileCount - Number of files that will be processed for this year
- * @param {GoogleAppsScript.Spreadsheet.Sheet} logSheet - Sheet for logging progress
- * @param {GoogleAppsScript.Spreadsheet.Sheet} processedSheet - The processed files sheet
- * @returns {GoogleAppsScript.Document.Document} The yearly document
- */
-function getOrCreateYearlyDocument(year, fileCount, logSheet, processedSheet) {
-  const docName = `${year} Wrestling Results`;
-  
-  // Check if we already have a document for this year
-  const data = processedSheet.getDataRange().getValues();
-  let existingDocId = null;
-  
-  for (let i = 1; i < data.length; i++) { // Skip header row
-    if (data[i][2] === year.toString() && data[i][4]) {
-      existingDocId = data[i][4];
-      break;
-    }
-  }
-  
-  if (existingDocId) {
-    try {
-      const existingDoc = DocumentApp.openById(existingDocId);
-      logProgress(logSheet, `Using existing yearly document for ${year}: ${existingDoc.getName()}`);
-      return existingDoc;
-    } catch (error) {
-      logProgress(logSheet, `Existing document ${existingDocId} not accessible, creating new one`);
-    }
-  }
-  
-  // Create new document
-  return createYearlyDocument(year, fileCount, logSheet);
-}
 
 /**
  * Logs progress messages to the specified Google Sheet with timestamps
@@ -1473,76 +1345,7 @@ function testDateExtraction() {
   console.log('String result:', stringResult);
 }
 
-/**
- * Resets the processed files tracking (use with caution)
- */
-function resetProcessedFilesTracking() {
-  const confirmation = Browser.msgBox(
-    'Reset File Tracking',
-    'This will clear all processed file records and cause all files to be processed again. Are you sure?',
-    Browser.Buttons.YES_NO
-  );
-  
-  if (confirmation === 'yes') {
-    try {
-      const processedSheet = getProcessedFilesSheet();
-      
-      // Clear all data except headers
-      const lastRow = processedSheet.getLastRow();
-      if (lastRow > 1) {
-        processedSheet.getRange(2, 1, lastRow - 1, 6).clearContent();
-      }
-      
-      console.log('✅ Processed files tracking has been reset');
-      Browser.msgBox('Reset Complete', 'All processed file records have been cleared.', Browser.Buttons.OK);
-      
-    } catch (error) {
-      console.error('❌ Failed to reset tracking:', error.message);
-      Browser.msgBox('Reset Failed', `Error: ${error.message}`, Browser.Buttons.OK);
-    }
-  }
-}
 
-/**
- * Shows processing statistics
- */
-function showProcessingStats() {
-  try {
-    const processedSheet = getProcessedFilesSheet();
-    const data = processedSheet.getDataRange().getValues();
-    
-    if (data.length <= 1) {
-      Browser.msgBox('Processing Stats', 'No files have been processed yet.', Browser.Buttons.OK);
-      return;
-    }
-    
-    const stats = {};
-    let totalFiles = 0;
-    
-    for (let i = 1; i < data.length; i++) { // Skip header
-      const year = data[i][2];
-      const status = data[i][5];
-      
-      if (status === 'Completed') {
-        if (!stats[year]) {
-          stats[year] = 0;
-        }
-        stats[year]++;
-        totalFiles++;
-      }
-    }
-    
-    let message = `Total processed files: ${totalFiles}\n\nBy year:\n`;
-    for (const year of Object.keys(stats).sort()) {
-      message += `${year}: ${stats[year]} files\n`;
-    }
-    
-    Browser.msgBox('Processing Statistics', message, Browser.Buttons.OK);
-    
-  } catch (error) {
-    Browser.msgBox('Error', `Failed to get stats: ${error.message}`, Browser.Buttons.OK);
-  }
-}
 
 /**
  * Test function to verify special result formatting
