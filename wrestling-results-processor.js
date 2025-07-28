@@ -157,25 +157,33 @@ function extractEarliestDate(cleanedResults) {
         continue;
       }
       
-      // Look for various date formats
-      const datePatterns = [
-        {
-          pattern: /(\d{1,2})\/(\d{1,2})\/(\d{4})/,
-          type: 'mdy_slash'
-        },
-        {
-          pattern: /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(st|nd|rd|th)?,?\s+(\d{4})/i,
-          type: 'month_name'
-        },
-        {
-          pattern: /(\d{1,2})-(\d{1,2})-(\d{4})/,
-          type: 'mdy_dash'
-        },
-        {
-          pattern: /(\d{4})-(\d{1,2})-(\d{1,2})/,
-          type: 'ymd_dash'
-        }
-      ];
+             // Look for various date formats
+       const datePatterns = [
+         {
+           pattern: /(\d{1,2})\/(\d{1,2})\/(\d{4})/,
+           type: 'mdy_slash'
+         },
+         {
+           pattern: /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(st|nd|rd|th)?,?\s+(\d{4})/i,
+           type: 'month_name'
+         },
+         {
+           pattern: /(\d{1,2})-(\d{1,2})-(\d{4})/,
+           type: 'mdy_dash'
+         },
+         {
+           pattern: /(\d{4})-(\d{1,2})-(\d{1,2})/,
+           type: 'ymd_dash'
+         },
+         {
+           pattern: /(\d{1,2})\.(\d{1,2})\.(\d{4})/,
+           type: 'mdy_dot'
+         },
+         {
+           pattern: /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(st|nd|rd|th)?,?\s+(\d{4})/i,
+           type: 'month_abbrev'
+         }
+       ];
       
       for (let j = 0; j < datePatterns.length; j++) {
         const { pattern, type } = datePatterns[j];
@@ -183,31 +191,41 @@ function extractEarliestDate(cleanedResults) {
         if (match) {
           let date;
           
-          try {
-            if (type === 'month_name') {
-              // Month name format
-              const months = {
-                'january': 0, 'february': 1, 'march': 2, 'april': 3,
-                'may': 4, 'june': 5, 'july': 6, 'august': 7,
-                'september': 8, 'october': 9, 'november': 10, 'december': 11
-              };
-              const month = months[match[1].toLowerCase()];
-              const day = parseInt(match[2], 10);
-              const year = parseInt(match[4], 10);
-              date = new Date(year, month, day);
-            } else if (type === 'ymd_dash') {
-              // YYYY-MM-DD format
-              const year = parseInt(match[1], 10);
-              const month = parseInt(match[2], 10) - 1; // JavaScript months are 0-indexed
-              const day = parseInt(match[3], 10);
-              date = new Date(year, month, day);
-            } else {
-              // MM/DD/YYYY or MM-DD-YYYY format
-              const month = parseInt(match[1], 10) - 1; // JavaScript months are 0-indexed
-              const day = parseInt(match[2], 10);
-              const year = parseInt(match[3], 10);
-              date = new Date(year, month, day);
-            }
+                     try {
+             if (type === 'month_name') {
+               // Month name format
+               const months = {
+                 'january': 0, 'february': 1, 'march': 2, 'april': 3,
+                 'may': 4, 'june': 5, 'july': 6, 'august': 7,
+                 'september': 8, 'october': 9, 'november': 10, 'december': 11
+               };
+               const month = months[match[1].toLowerCase()];
+               const day = parseInt(match[2], 10);
+               const year = parseInt(match[4], 10);
+               date = new Date(year, month, day);
+             } else if (type === 'month_abbrev') {
+               // Month abbreviation format
+               const months = {
+                 'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
+                 'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
+               };
+               const month = months[match[1].toLowerCase().substring(0, 3)];
+               const day = parseInt(match[2], 10);
+               const year = parseInt(match[4], 10);
+               date = new Date(year, month, day);
+             } else if (type === 'ymd_dash') {
+               // YYYY-MM-DD format
+               const year = parseInt(match[1], 10);
+               const month = parseInt(match[2], 10) - 1; // JavaScript months are 0-indexed
+               const day = parseInt(match[3], 10);
+               date = new Date(year, month, day);
+             } else {
+               // MM/DD/YYYY, MM-DD-YYYY, or MM.DD.YYYY format
+               const month = parseInt(match[1], 10) - 1; // JavaScript months are 0-indexed
+               const day = parseInt(match[2], 10);
+               const year = parseInt(match[3], 10);
+               date = new Date(year, month, day);
+             }
             
             if (!isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 2100) {
               dates.push(date);
@@ -282,6 +300,7 @@ function onOpen() {
     .addItem('Test Year Parsing', 'testYearParsing')
     .addItem('Test Date Extraction', 'testDateExtraction')
     .addItem('Test Event Extraction', 'testEventExtraction')
+    .addItem('Test Chronological Sort', 'testChronologicalSorting')
     .addItem('Test Prose Filtering', 'testProseFiltering')
     .addItem('Test Wrestler Lines', 'testWrestlerLineFormatting')
     .addItem('Test Special Results', 'testSpecialResultFormatting')
@@ -362,6 +381,13 @@ async function processAllFiles() {
       });
       
       logProgress(logSheet, `Extracted and sorted ${allEvents.length} individual events chronologically for ${year}`);
+      
+      // Debug: Log the chronological order
+      logProgress(logSheet, 'CHRONOLOGICAL ORDER DEBUG:');
+      allEvents.forEach((event, index) => {
+        const dateStr = event.date ? event.date.toISOString().split('T')[0] : 'NO DATE';
+        logProgress(logSheet, `${index + 1}. ${dateStr} - ${event.fileName} - ${event.seriesName}`);
+      });
       
       // Process all events in chronological order
       let processedCount = 0;
@@ -447,15 +473,31 @@ function extractEventsFromParsedData(parsedData, fileData, logSheet) {
   for (let i = 0; i < cleanedResults.length; i++) {
     const item = cleanedResults[i];
     
-    // Check if this is a separator that indicates a new event
-    if (item.type === 'separator' || (item.type === 'content' && (item.content === '——' || item.content === '---'))) {
+    // Check if this is a separator that indicates a new event OR a new event header
+    const isEventSeparator = item.type === 'separator' || 
+                            (item.type === 'content' && (item.content === '——' || item.content === '---'));
+    
+    // Also check if this looks like a new event header (contains date and venue)
+    const isEventHeader = item.type === 'content' && 
+                         item.content.match(/^\*\*.*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}.*\*\*/) && 
+                         currentEvent.cleanedResults.length > 0; // Only if we already have content
+    
+    if (isEventSeparator || isEventHeader) {
       // If we have accumulated content, save the current event
       if (hasEventContent && currentEvent.cleanedResults.length > 0) {
         // Try to extract date for this event
         currentEvent.date = extractEarliestDateSafe(currentEvent.cleanedResults);
+        
+        // Debug: Log the content being used for date extraction
+        const contentForDate = currentEvent.cleanedResults
+          .filter(r => r.type === 'content')
+          .map(r => r.content)
+          .slice(0, 3) // First 3 lines
+          .join(' | ');
+        
         events.push(currentEvent);
         
-        logProgress(logSheet, `Extracted event from ${fileData.name}: ${currentEvent.date ? currentEvent.date.toDateString() : 'No date found'}`);
+        logProgress(logSheet, `Extracted event from ${fileData.name}: ${currentEvent.date ? currentEvent.date.toDateString() : 'No date found'} - Content: ${contentForDate.substring(0, 100)}...`);
       }
       
       // Start a new event
@@ -466,6 +508,12 @@ function extractEventsFromParsedData(parsedData, fileData, logSheet) {
         date: null
       };
       hasEventContent = false;
+      
+      // If this was an event header (not separator), include it in the new event
+      if (isEventHeader) {
+        currentEvent.cleanedResults.push(item);
+        hasEventContent = true;
+      }
       
     } else {
       // Add this item to the current event
@@ -1499,6 +1547,75 @@ function testDateExtraction() {
 }
 
 
+
+/**
+ * Test function to verify chronological sorting with realistic data
+ */
+function testChronologicalSorting() {
+  console.log('Testing chronological sorting with realistic data...');
+  
+  // Simulate multiple files with events in different orders
+  const file1Data = {
+    seriesName: 'Spring Tournament 2002',
+    cleanedResults: [
+      { type: 'content', content: '**5/15/2002 Tokyo, Korakuen Hall - 2100 Attendance**' },
+      { type: 'content', content: '① Singles Match' },
+      { type: 'content', content: 'Dragon Kid vs CIMA' },
+      { type: 'separator', content: '——' },
+      { type: 'content', content: '**5/10/2002 Osaka, Prefectural Gym - 1800 Attendance**' },
+      { type: 'content', content: '② Tag Team Match' },
+      { type: 'content', content: 'Team A vs Team B' }
+    ]
+  };
+  
+  const file2Data = {
+    seriesName: 'April Championship 2002',
+    cleanedResults: [
+      { type: 'content', content: '**4/25/2002 Hiroshima, Sports Center - 1500 Attendance**' },
+      { type: 'content', content: '③ Battle Royal' },
+      { type: 'content', content: 'Multiple wrestlers' },
+      { type: 'separator', content: '——' },
+      { type: 'content', content: '**4/20/2002 Fukuoka, Civic Hall - 1200 Attendance**' },
+      { type: 'content', content: '④ Championship Match' },
+      { type: 'content', content: 'Champion vs Challenger' }
+    ]
+  };
+  
+  const mockLogSheet = {
+    appendRow: () => {}
+  };
+  
+  // Extract events from both files
+  const events1 = extractEventsFromParsedData(file1Data, { name: 'spring2002.md' }, mockLogSheet);
+  const events2 = extractEventsFromParsedData(file2Data, { name: 'april2002.md' }, mockLogSheet);
+  
+  // Combine all events
+  const allEvents = [...events1, ...events2];
+  
+  console.log('\n=== BEFORE SORTING ===');
+  allEvents.forEach((event, index) => {
+    console.log(`${index + 1}. ${event.date ? event.date.toDateString() : 'No date'} - ${event.fileName}`);
+  });
+  
+  // Sort chronologically
+  allEvents.sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return a.date - b.date;
+  });
+  
+  console.log('\n=== AFTER CHRONOLOGICAL SORTING ===');
+  allEvents.forEach((event, index) => {
+    console.log(`${index + 1}. ${event.date ? event.date.toDateString() : 'No date'} - ${event.fileName}`);
+  });
+  
+  console.log('\n=== EXPECTED ORDER ===');
+  console.log('1. April 20, 2002 (fukuoka)');
+  console.log('2. April 25, 2002 (hiroshima)');
+  console.log('3. May 10, 2002 (osaka)');
+  console.log('4. May 15, 2002 (tokyo)');
+}
 
 /**
  * Test function to verify event extraction and chronological sorting
