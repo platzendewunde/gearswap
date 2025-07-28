@@ -305,6 +305,7 @@ function onOpen() {
     .addItem('Test Output Formatting', 'testOutputFormatting')
     .addItem('Test Event Processing', 'testEventProcessing')
     .addItem('Test First Event Extraction', 'testFirstEventExtraction')
+    .addItem('Test Symbol Formatting', 'testSymbolFormatting')
     .addItem('Test Prose Filtering', 'testProseFiltering')
     .addItem('Test Series Headers', 'testSeriesHeaders')
     .addItem('Test Wrestler Lines', 'testWrestlerLineFormatting')
@@ -1026,7 +1027,10 @@ IMPORTANT:
 **WRESTLER NAME FORMATTING:**
 - Keep exact spelling: YAMATO, BxB Hulk, Strong Machine J, etc.
 - Preserve special characters and capitalization
+- EVERY MATCH MUST HAVE BOTH WINNER AND LOSER MARKED (except special results)
 - ONLY mark the actual winner and loser, not entire teams
+- Singles matches: Winner gets ⭕️, loser gets ❌
+- Tag/Multi-man matches: One winner per team gets ⭕️, one loser per team gets ❌
 
 **CHAMPIONSHIP FORMATTING:**
 - "(Champion)" and "(Challenger)" labels
@@ -1044,16 +1048,45 @@ ${contentText}
 - ⭕️ symbol is ONLY for: Actual winners (pins, submissions, etc.)
 - ❌ symbol is ONLY for: Actual losers (pinned, submitted, etc.)
 
+**MANDATORY WINNER/LOSER MARKING:**
+- EVERY MATCH must have clearly marked winners and losers
+- Singles Match: One ⭕️ winner, one ❌ loser (unless special result)
+- Tag Match: One ⭕️ per winning team, one ❌ per losing team  
+- Multi-man Match: One ⭕️ per winning team, one ❌ per losing team
+- NO CONTEST matches: All participants get ▲ (replace winner/loser symbols)
+- DRAW matches: All participants get △ (replace winner/loser symbols)
+
 **CRITICAL WRESTLER LINE FORMATTING EXAMPLES:**
+
 CORRECT Singles Match Format:
-② El Numero Uno Block C:
-SUWA▲
+② Singles Match
+SUWA⭕️
+vs
+Raimu Mishima❌
+(3:18 FFF)
+
+CORRECT No Contest Format:
+② Singles Match
+Jorge Rivera▲
 vs
 Darkness Dragon▲
-(8:01 Double Count Out)
+(4:50 No Contest due to M2K interference)
 
-WRONG Format (DO NOT DO THIS):
-SUWA▲ vs Darkness Dragon▲
+CORRECT Draw Format:
+② Tag Team Match
+Masaaki Mochizuki△
+Kenichiro Arai△
+vs
+Dragon Kid△
+Ryo Saito△
+(15:00 Draw)
+
+WRONG Singles Format (MISSING LOSER SYMBOL):
+② Singles Match
+SUWA⭕️
+vs
+Raimu Mishima
+(3:18 FFF)
 
 CORRECT Tag Team Format:
 ① Tag Team Match
@@ -1070,7 +1103,13 @@ CIMA❌
 - If it says "Time Limit Draw" anywhere → use △
 - If it says "Double Pinfall" anywhere → use △
 
-CRITICAL: Before formatting, sort all shows/events by date chronologically (earliest first). Return the content formatted exactly like the Dragon Gate style shown above. Preserve all wrestler names, match times, and finish moves accurately. Handle elimination matches and 2/3 falls with the ❶❷❸ format. Replace any scores between teams with "vs". Do not add commentary or analysis.`;
+CRITICAL: Before formatting, sort all shows/events by date chronologically (earliest first). Return the content formatted exactly like the Dragon Gate style shown above. Preserve all wrestler names, match times, and finish moves accurately. Handle elimination matches and 2/3 falls with the ❶❷❸ format. Replace any scores between teams with "vs". Do not add commentary or analysis.
+
+FINAL REMINDER - SYMBOL REQUIREMENTS:
+- EVERY regular match MUST have both ⭕️ winner AND ❌ loser marked
+- NO CONTEST matches: ALL participants get ▲ (no ⭕️ or ❌)
+- DRAW matches: ALL participants get △ (no ⭕️ or ❌)
+- Check every match before completing to ensure proper symbols are applied`;
     
     const requestBody = {
       contents: [{
@@ -2241,4 +2280,98 @@ async function testFirstEventExtraction() {
     console.error('Error in test:', error);
     logProgress(logSheet, `Test error: ${error.message}`);
   }
+}
+
+/**
+ * Test function to verify winner/loser symbol formatting
+ */
+async function testSymbolFormatting() {
+  console.log('Testing winner/loser symbol formatting...');
+  
+  const logSheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+  
+  // Test different match types and special results
+  const testCases = [
+    {
+      name: 'Singles Match',
+      data: [
+        { type: 'content', content: '② Singles Match' },
+        { type: 'content', content: 'SUWA vs Raimu Mishima' },
+        { type: 'content', content: '(3:18 FFF)' }
+      ]
+    },
+    {
+      name: 'No Contest',
+      data: [
+        { type: 'content', content: '② Singles Match' },
+        { type: 'content', content: 'Jorge Rivera vs Darkness Dragon' },
+        { type: 'content', content: '(4:50 No Contest due to M2K interference)' }
+      ]
+    },
+    {
+      name: 'Time Limit Draw',
+      data: [
+        { type: 'content', content: '② Tag Team Match' },
+        { type: 'content', content: 'Masaaki Mochizuki & Kenichiro Arai vs Dragon Kid & Ryo Saito' },
+        { type: 'content', content: '(15:00 Draw)' }
+      ]
+    },
+    {
+      name: 'Tag Team Match',
+      data: [
+        { type: 'content', content: '① Tag Team Match' },
+        { type: 'content', content: 'Dragon Kid & Genki Horiguchi vs Darkness Dragon & CIMA' },
+        { type: 'content', content: '(16:45 Ultra Hurricanrana)' }
+      ]
+    }
+  ];
+  
+  for (const testCase of testCases) {
+    try {
+      console.log(`\nTesting: ${testCase.name}`);
+      
+      const formatted = await formatWithGeminiAPI(testCase.data, 'Symbol Test', logSheet);
+      console.log('Formatted result:');
+      console.log(formatted);
+      
+      // Check for proper symbols
+      const lines = formatted.split('\n');
+      const hasWinnerSymbol = formatted.includes('⭕️');
+      const hasLoserSymbol = formatted.includes('❌');
+      const hasNoContestSymbol = formatted.includes('▲');
+      const hasDrawSymbol = formatted.includes('△');
+      
+      console.log('Symbol analysis:');
+      console.log(`- Winner symbol (⭕️): ${hasWinnerSymbol}`);
+      console.log(`- Loser symbol (❌): ${hasLoserSymbol}`);
+      console.log(`- No Contest symbol (▲): ${hasNoContestSymbol}`);
+      console.log(`- Draw symbol (△): ${hasDrawSymbol}`);
+      
+      // Validate based on test case
+      if (testCase.name === 'Singles Match' || testCase.name === 'Tag Team Match') {
+        if (!hasWinnerSymbol || !hasLoserSymbol) {
+          console.error(`❌ FAILED: ${testCase.name} missing winner/loser symbols!`);
+        } else {
+          console.log(`✅ PASSED: ${testCase.name} has proper winner/loser symbols`);
+        }
+      } else if (testCase.name === 'No Contest') {
+        if (!hasNoContestSymbol) {
+          console.error(`❌ FAILED: No Contest missing ▲ symbols!`);
+        } else {
+          console.log(`✅ PASSED: No Contest has proper ▲ symbols`);
+        }
+      } else if (testCase.name === 'Time Limit Draw') {
+        if (!hasDrawSymbol) {
+          console.error(`❌ FAILED: Draw missing △ symbols!`);
+        } else {
+          console.log(`✅ PASSED: Draw has proper △ symbols`);
+        }
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error testing ${testCase.name}:`, error.message);
+    }
+  }
+  
+  console.log('\nSymbol formatting test completed');
 }
