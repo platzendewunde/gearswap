@@ -302,6 +302,7 @@ function onOpen() {
     .addItem('Test Event Extraction', 'testEventExtraction')
     .addItem('Test Chronological Sort', 'testChronologicalSorting')
     .addItem('Test Prose Filtering', 'testProseFiltering')
+    .addItem('Test Series Headers', 'testSeriesHeaders')
     .addItem('Test Wrestler Lines', 'testWrestlerLineFormatting')
     .addItem('Test Special Results', 'testSpecialResultFormatting')
     .addToUi();
@@ -389,17 +390,28 @@ async function processAllFiles() {
         logProgress(logSheet, `${index + 1}. ${dateStr} - ${event.fileName} - ${event.seriesName}`);
       });
       
-      // Process all events in chronological order
+      // Process all events in chronological order, tracking series changes
       let processedCount = 0;
+      let currentSeries = null;
+      
       for (const event of allEvents) {
         try {
           logProgress(logSheet, `Processing event from ${event.fileName}: ${event.seriesName}`);
           
-          // Format this individual event using Gemini API
-          const formattedContent = await formatWithGeminiAPI(event.cleanedResults, event.seriesName, logSheet);
+          // Check if this is a new series
+          const isNewSeries = currentSeries !== event.seriesName;
           
-          // Append to yearly document
-          appendSeriesToDocument(yearlyDoc, event.seriesName, formattedContent, logSheet);
+          // Format this individual event using Gemini API (without series header)
+          const formattedContent = await formatWithGeminiAPI(event.cleanedResults, '', logSheet);
+          
+          if (isNewSeries) {
+            // Add series header for new series
+            appendSeriesHeader(yearlyDoc, event.seriesName, logSheet);
+            currentSeries = event.seriesName;
+          }
+          
+          // Append event content to yearly document (without series name)
+          appendEventToDocument(yearlyDoc, formattedContent, logSheet);
           
           processedCount++;
           logProgress(logSheet, `✅ Successfully processed event (${processedCount}/${allEvents.length})`);
@@ -863,8 +875,6 @@ async function formatWithGeminiAPI(cleanedResults, seriesName, logSheet) {
     const prompt = `You are formatting Dragon Gate professional wrestling results. Please format the following wrestling event data to match this EXACT structure and format:
 
 **REQUIRED FORMAT EXAMPLE:**
-## El Numero Uno Special 2001
-
 May 12th, 2001
 Tokyo, Korakuen Hall  
 Attendance: 2100
@@ -920,16 +930,13 @@ TARU❌
 - Replace any team scores like "Team A (3-2) Team B" with "Team A vs Team B"
 
 IMPORTANT: 
-- Extract series name from YAML title field, place as ## header before first show only
+- DO NOT include series name headers (##) in the output - these are handled separately
 - IGNORE any dates in YAML frontmatter (WordPress upload dates)
 - Sort ALL shows chronologically by actual show date
-- Series header appears once before first show, not repeated
+- Focus on formatting individual event content only
 
 **CRITICAL FORMATTING RULES:**
-1. **SERIES NAME**: Use title from YAML frontmatter as ## Header 2, ignore WordPress upload date
-   - YAML frontmatter format: ---\ntitle: "Series Name"\ndate: 2015-08-19\n---
-   - IGNORE the date field (WordPress upload date)
-   - Use title field as series header before FIRST show only
+1. **NO SERIES HEADERS**: Do not include any ## headers in the output - only format the event content
 2. **DATE FORMAT**: Must be "Month DDth, YYYY" (January 16th, 2000)
    - Convert from any format (4/26/2001, 2015-08-19, 11/25/2001, etc.)
    - Use full month names and proper ordinals (1st, 2nd, 3rd, 4th, etc.)
@@ -1423,6 +1430,69 @@ function createYearlyDocument(year, fileCount, logSheet) {
 }
 
 /**
+ * Appends just a series header to the yearly Google Doc
+ * @param {GoogleAppsScript.Document.Document} doc - The yearly document
+ * @param {string} seriesName - Name of the series
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} logSheet - Sheet for logging progress
+ */
+function appendSeriesHeader(doc, seriesName, logSheet) {
+  try {
+    const body = doc.getBody();
+    
+    // Add series header as Header 2
+    const header = body.appendParagraph(seriesName);
+    header.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    
+    // Add empty line after header
+    body.appendParagraph('');
+    
+    logProgress(logSheet, `✅ Added series header: ${seriesName}`);
+    
+  } catch (error) {
+    logProgress(logSheet, `ERROR adding series header ${seriesName}: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Appends event content to the yearly Google Doc (without series header)
+ * @param {GoogleAppsScript.Document.Document} doc - The yearly document
+ * @param {string} formattedContent - Formatted content to append
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} logSheet - Sheet for logging progress
+ */
+function appendEventToDocument(doc, formattedContent, logSheet) {
+  try {
+    const body = doc.getBody();
+    
+    // Add content
+    const lines = formattedContent.split('\n');
+    for (const line of lines) {
+      if (line.trim() === '') {
+        body.appendParagraph(''); // Empty line
+      } else if (line.startsWith('###')) {
+        const header = body.appendParagraph(line.replace(/^###\s*/, ''));
+        header.setHeading(DocumentApp.ParagraphHeading.HEADING3);
+      } else if (line.startsWith('##')) {
+        // Skip ## headers since we handle series headers separately
+        continue;
+      } else if (line.startsWith('#')) {
+        const header = body.appendParagraph(line.replace(/^#\s*/, ''));
+        header.setHeading(DocumentApp.ParagraphHeading.HEADING3);
+      } else {
+        body.appendParagraph(line);
+      }
+    }
+    
+    // Add separator after event
+    body.appendParagraph('');
+    
+  } catch (error) {
+    logProgress(logSheet, `ERROR appending event content: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
  * Appends a series/event to the yearly Google Doc
  * @param {GoogleAppsScript.Document.Document} doc - The yearly document
  * @param {string} seriesName - Name of the series/event (not used since it's in formatted content)
@@ -1721,6 +1791,50 @@ function testProseFiltering() {
   console.log('\n=== SUMMARY ===');
   console.log('✅ Lines marked KEEP should be wrestling content (events, matches, results)');
   console.log('❌ Lines marked FILTER should be prose/narrative content');
+}
+
+/**
+ * Test function to verify series header behavior
+ */
+async function testSeriesHeaders() {
+  console.log('Testing series header behavior...');
+  
+  const logSheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+  
+  // Test formatting without series header
+  const testData = [
+    { type: 'content', content: '**5/15/2002 Tokyo, Korakuen Hall - 2100 Attendance**' },
+    { type: 'content', content: '① Singles Match' },
+    { type: 'content', content: 'Dragon Kid vs CIMA' },
+    { type: 'content', content: '(15:30 Ultra Hurricanrana)' }
+  ];
+  
+  try {
+    const result = await formatWithGeminiAPI(testData, '', logSheet);
+    console.log('Formatted result:');
+    console.log(result);
+    
+    // Check that no ## headers are included
+    const lines = result.split('\n');
+    let hasSeriesHeader = false;
+    
+    for (const line of lines) {
+      if (line.trim().startsWith('##')) {
+        hasSeriesHeader = true;
+        console.log(`❌ Found series header: ${line}`);
+        break;
+      }
+    }
+    
+    if (!hasSeriesHeader) {
+      console.log('✅ No series headers found in formatted output');
+    } else {
+      console.log('❌ Series headers found - should be handled separately');
+    }
+    
+  } catch (error) {
+    console.error('❌ Test failed:', error.message);
+  }
 }
 
 /**
