@@ -281,6 +281,7 @@ function onOpen() {
     .addItem('Test Gemini API', 'testGeminiAPI')
     .addItem('Test Year Parsing', 'testYearParsing')
     .addItem('Test Date Extraction', 'testDateExtraction')
+    .addItem('Test Event Extraction', 'testEventExtraction')
     .addItem('Test Prose Filtering', 'testProseFiltering')
     .addItem('Test Special Results', 'testSpecialResultFormatting')
     .addToUi();
@@ -316,11 +317,13 @@ async function processAllFiles() {
       
       logProgress(logSheet, `Created yearly document for ${year}: ${yearlyDoc.getName()}`);
       
-      // Parse all files first to get their dates for chronological sorting
+      // Parse all files and extract individual events for global chronological sorting
+      const allEvents = [];
       const parsedFiles = [];
+      
       for (const fileData of yearFiles) {
         try {
-          logProgress(logSheet, `Parsing file for date sorting: ${fileData.name}`);
+          logProgress(logSheet, `Parsing file and extracting events: ${fileData.name}`);
           const parsedData = parseMarkdownFile(fileData.file, logSheet);
           
           // Validate parsed data structure
@@ -329,65 +332,62 @@ async function processAllFiles() {
             throw new Error(`Invalid parsed data structure for ${fileData.name}`);
           }
           
-          const earliestDate = extractEarliestDateSafe(parsedData.cleanedResults);
+          // Extract individual events from this file
+          const events = extractEventsFromParsedData(parsedData, fileData, logSheet);
+          allEvents.push(...events);
           
           parsedFiles.push({
             fileData: fileData,
             parsedData: parsedData,
-            earliestDate: earliestDate
+            eventCount: events.length
           });
           
         } catch (parseError) {
-          logProgress(logSheet, `❌ FAILED to parse ${fileData.name} for sorting: ${parseError.message}`);
-          // Add without date for processing anyway
+          logProgress(logSheet, `❌ FAILED to parse ${fileData.name}: ${parseError.message}`);
           parsedFiles.push({
             fileData: fileData,
             parsedData: null,
-            earliestDate: null
+            eventCount: 0
           });
         }
       }
       
-      // Sort by earliest date (null dates go to end)
-      parsedFiles.sort((a, b) => {
-        if (!a.earliestDate && !b.earliestDate) return 0;
-        if (!a.earliestDate) return 1;
-        if (!b.earliestDate) return -1;
-        return a.earliestDate - b.earliestDate;
+      // Sort all events globally by date
+      allEvents.sort((a, b) => {
+        if (!a.date && !b.date) return 0;
+        if (!a.date) return 1;
+        if (!b.date) return -1;
+        return a.date - b.date;
       });
       
-      logProgress(logSheet, `Sorted ${parsedFiles.length} files chronologically for ${year}`);
+      logProgress(logSheet, `Extracted and sorted ${allEvents.length} individual events chronologically for ${year}`);
       
-      // Process each file in chronological order
+      // Process all events in chronological order
       let processedCount = 0;
-      for (const fileInfo of parsedFiles) {
+      for (const event of allEvents) {
         try {
-          const { fileData, parsedData } = fileInfo;
-          logProgress(logSheet, `Processing file: ${fileData.name}`);
+          logProgress(logSheet, `Processing event from ${event.fileName}: ${event.seriesName}`);
           
-          // Use already parsed data or parse if failed earlier
-          const finalParsedData = parsedData || parseMarkdownFile(fileData.file, logSheet);
+          // Format this individual event using Gemini API
+          const formattedContent = await formatWithGeminiAPI(event.cleanedResults, event.seriesName, logSheet);
           
-          // Format content using Gemini API
-          const formattedContent = await formatWithGeminiAPI(finalParsedData.cleanedResults, finalParsedData.seriesName, logSheet);
-          
-          // Append to yearly document (without duplicate series name)
-          appendSeriesToDocument(yearlyDoc, finalParsedData.seriesName, formattedContent, logSheet);
+          // Append to yearly document
+          appendSeriesToDocument(yearlyDoc, event.seriesName, formattedContent, logSheet);
           
           processedCount++;
-          logProgress(logSheet, `✅ Successfully processed ${fileData.name} (${processedCount}/${yearFiles.length})`);
+          logProgress(logSheet, `✅ Successfully processed event (${processedCount}/${allEvents.length})`);
           
-        } catch (fileError) {
-          logProgress(logSheet, `❌ FAILED to process ${fileInfo.fileData.name}: ${fileError.message}`);
-          // Continue processing other files despite individual failures
+        } catch (eventError) {
+          logProgress(logSheet, `❌ FAILED to process event from ${event.fileName}: ${eventError.message}`);
+          // Continue processing other events despite individual failures
         }
       }
       
       // Finalize the yearly document
       finalizeYearlyDocument(yearlyDoc, processedCount, logSheet);
-      logProgress(logSheet, `📄 Completed ${year} document with ${processedCount}/${yearFiles.length} files processed`);
+      logProgress(logSheet, `📄 Completed ${year} document with ${processedCount} events from ${yearFiles.length} files processed`);
       
-      logProgress(logSheet, `Completed processing ${year} (${yearFiles.length} files)`);
+      logProgress(logSheet, `Completed processing ${year} (${allEvents.length} events from ${yearFiles.length} files, chronologically sorted)`);
     }
     
     logProgress(logSheet, 'Processing workflow partially implemented - file discovery complete');
@@ -417,6 +417,89 @@ function getApiKey() {
 }
 
 
+
+/**
+ * Extracts individual events from parsed markdown data for chronological sorting
+ * @param {Object} parsedData - The parsed markdown data
+ * @param {Object} fileData - The original file data
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} logSheet - Sheet for logging progress
+ * @returns {Array} Array of individual events with dates
+ */
+function extractEventsFromParsedData(parsedData, fileData, logSheet) {
+  const events = [];
+  const cleanedResults = parsedData.cleanedResults;
+  
+  if (!Array.isArray(cleanedResults)) {
+    logProgress(logSheet, `⚠️ No cleanedResults array found in ${fileData.name}`);
+    return events;
+  }
+  
+  let currentEvent = {
+    cleanedResults: [],
+    seriesName: parsedData.seriesName,
+    fileName: fileData.name,
+    date: null
+  };
+  
+  let hasEventContent = false;
+  
+  for (let i = 0; i < cleanedResults.length; i++) {
+    const item = cleanedResults[i];
+    
+    // Check if this is a separator that indicates a new event
+    if (item.type === 'separator' || (item.type === 'content' && (item.content === '——' || item.content === '---'))) {
+      // If we have accumulated content, save the current event
+      if (hasEventContent && currentEvent.cleanedResults.length > 0) {
+        // Try to extract date for this event
+        currentEvent.date = extractEarliestDateSafe(currentEvent.cleanedResults);
+        events.push(currentEvent);
+        
+        logProgress(logSheet, `Extracted event from ${fileData.name}: ${currentEvent.date ? currentEvent.date.toDateString() : 'No date found'}`);
+      }
+      
+      // Start a new event
+      currentEvent = {
+        cleanedResults: [],
+        seriesName: parsedData.seriesName,
+        fileName: fileData.name,
+        date: null
+      };
+      hasEventContent = false;
+      
+    } else {
+      // Add this item to the current event
+      currentEvent.cleanedResults.push(item);
+      
+      // Check if this looks like event content (not just empty lines)
+      if (item.type === 'content' && item.content.trim() !== '') {
+        hasEventContent = true;
+      }
+    }
+  }
+  
+  // Don't forget the last event if there's no final separator
+  if (hasEventContent && currentEvent.cleanedResults.length > 0) {
+    currentEvent.date = extractEarliestDateSafe(currentEvent.cleanedResults);
+    events.push(currentEvent);
+    
+    logProgress(logSheet, `Extracted final event from ${fileData.name}: ${currentEvent.date ? currentEvent.date.toDateString() : 'No date found'}`);
+  }
+  
+  // If no separators were found, treat the entire file as one event
+  if (events.length === 0 && cleanedResults.length > 0) {
+    const singleEvent = {
+      cleanedResults: cleanedResults,
+      seriesName: parsedData.seriesName,
+      fileName: fileData.name,
+      date: extractEarliestDateSafe(cleanedResults)
+    };
+    events.push(singleEvent);
+    
+    logProgress(logSheet, `Treating entire file ${fileData.name} as single event: ${singleEvent.date ? singleEvent.date.toDateString() : 'No date found'}`);
+  }
+  
+  return events;
+}
 
 /**
  * Logs progress messages to the specified Google Sheet with timestamps
@@ -1380,6 +1463,70 @@ function testDateExtraction() {
 }
 
 
+
+/**
+ * Test function to verify event extraction and chronological sorting
+ */
+function testEventExtraction() {
+  console.log('Testing event extraction...');
+  
+  // Simulate parsed data with multiple events
+  const testParsedData = {
+    seriesName: 'Test Tournament 2002',
+    cleanedResults: [
+      { type: 'content', content: '**5/15/2002 Tokyo, Korakuen Hall - 2100 Attendance**' },
+      { type: 'content', content: '① Singles Match' },
+      { type: 'content', content: 'Dragon Kid vs CIMA' },
+      { type: 'content', content: '(15:30 Ultra Hurricanrana)' },
+      { type: 'separator', content: '——' },
+      { type: 'content', content: '**5/10/2002 Osaka, Prefectural Gym - 1800 Attendance**' },
+      { type: 'content', content: '② Tag Team Match' },
+      { type: 'content', content: 'Team A vs Team B' },
+      { type: 'content', content: '(20:15 Suplex)' },
+      { type: 'separator', content: '——' },
+      { type: 'content', content: '**5/20/2002 Hiroshima, Sports Center - 1500 Attendance**' },
+      { type: 'content', content: '③ Battle Royal' },
+      { type: 'content', content: 'Multiple wrestlers' },
+      { type: 'content', content: '(25:00 Last man standing)' }
+    ]
+  };
+  
+  const testFileData = {
+    name: 'test-may2002.md',
+    id: 'test123'
+  };
+  
+  // Create a mock log sheet
+  const mockLogSheet = {
+    appendRow: () => {},
+    getRange: () => ({ setValues: () => {}, setFontWeight: () => {}, setBackground: () => {}, setFontColor: () => {} })
+  };
+  
+  const events = extractEventsFromParsedData(testParsedData, testFileData, mockLogSheet);
+  
+  console.log(`\n=== EXTRACTED ${events.length} EVENTS ===`);
+  events.forEach((event, index) => {
+    console.log(`Event ${index + 1}:`);
+    console.log(`  Date: ${event.date ? event.date.toDateString() : 'No date'}`);
+    console.log(`  Series: ${event.seriesName}`);
+    console.log(`  File: ${event.fileName}`);
+    console.log(`  Content blocks: ${event.cleanedResults.length}`);
+    console.log('');
+  });
+  
+  // Test chronological sorting
+  events.sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return a.date - b.date;
+  });
+  
+  console.log('=== AFTER CHRONOLOGICAL SORTING ===');
+  events.forEach((event, index) => {
+    console.log(`${index + 1}. ${event.date ? event.date.toDateString() : 'No date'}`);
+  });
+}
 
 /**
  * Test function to verify prose filtering
