@@ -304,6 +304,7 @@ function onOpen() {
     .addItem('Test Year Filtering', 'testYearFiltering')
     .addItem('Test Output Formatting', 'testOutputFormatting')
     .addItem('Test Event Processing', 'testEventProcessing')
+    .addItem('Test First Event Extraction', 'testFirstEventExtraction')
     .addItem('Test Prose Filtering', 'testProseFiltering')
     .addItem('Test Series Headers', 'testSeriesHeaders')
     .addItem('Test Wrestler Lines', 'testWrestlerLineFormatting')
@@ -401,6 +402,16 @@ async function processAllFiles() {
         }
         eventsBySeries[event.seriesName].push(event);
       });
+      
+      // Sort events within each series by date to maintain chronological order
+      Object.keys(eventsBySeries).forEach(seriesName => {
+        eventsBySeries[seriesName].sort((a, b) => {
+          if (!a.date && !b.date) return 0;
+          if (!a.date) return 1;
+          if (!b.date) return -1;
+          return a.date - b.date;
+        });
+      });
 
       // Process each series
       let processedCount = 0;
@@ -410,10 +421,18 @@ async function processAllFiles() {
         try {
           logProgress(logSheet, `Processing series: ${seriesName} (${seriesEvents.length} events)`);
           
-          // Combine all events in this series
+          // Combine all events in this series with proper separators
           const combinedResults = [];
-          for (const event of seriesEvents) {
+          for (let i = 0; i < seriesEvents.length; i++) {
+            const event = seriesEvents[i];
+            
+            // Add the event content
             combinedResults.push(...event.cleanedResults);
+            
+            // Add separator between events (but not after the last one)
+            if (i < seriesEvents.length - 1) {
+              combinedResults.push({ type: 'separator', content: '——' });
+            }
           }
           
           // Format the entire series using Gemini API
@@ -489,6 +508,7 @@ function extractEventsFromParsedData(parsedData, fileData, logSheet) {
   };
   
   let hasEventContent = false;
+  let isFirstEvent = true;
   
   for (let i = 0; i < cleanedResults.length; i++) {
     const item = cleanedResults[i];
@@ -528,6 +548,7 @@ function extractEventsFromParsedData(parsedData, fileData, logSheet) {
         date: null
       };
       hasEventContent = false;
+      isFirstEvent = false;
       
       // If this was an event header (not separator), include it in the new event
       if (isEventHeader) {
@@ -941,9 +962,11 @@ TARU❌
 
 IMPORTANT: 
 - Extract series name from YAML title field, place as ## header before first show only
-- IGNORE any dates in YAML frontmatter (WordPress upload dates)
+- IGNORE any dates in YAML frontmatter (WordPress upload dates) 
 - Sort ALL shows chronologically by actual show date
 - Series header appears once before first show, not repeated
+- PRESERVE all event headers and ensure complete event information is maintained
+- Each event should start with a clear date/venue header
 
 **CRITICAL FORMATTING RULES:**
 1. **SERIES NAME**: Use title from YAML frontmatter as ## Header 2, ignore WordPress upload date
@@ -2154,5 +2177,68 @@ async function testEventProcessing() {
   } catch (error) {
     console.error('❌ Event processing test failed:', error.message);
     return false;
+  }
+}
+
+/**
+ * Test function to debug first event extraction issues
+ */
+async function testFirstEventExtraction() {
+  console.log('Testing first event extraction...');
+  
+  const logSheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+  
+  try {
+    // Get a test file to examine
+    const sourceFolder = DriveApp.getFolderById(CONFIG.SOURCE_FOLDER_ID);
+    const files = sourceFolder.getFiles();
+    
+    let testFile = null;
+    while (files.hasNext()) {
+      const file = files.next();
+      if (file.getName().includes('02')) { // Get a 2002 file
+        testFile = file;
+        break;
+      }
+    }
+    
+    if (!testFile) {
+      console.log('No test file found');
+      return;
+    }
+    
+    console.log(`Testing with file: ${testFile.getName()}`);
+    
+    // Parse the file
+    const parsedData = parseMarkdownFile(testFile, logSheet);
+    console.log(`Parsed data - Series: ${parsedData.seriesName}`);
+    console.log(`CleanedResults length: ${parsedData.cleanedResults.length}`);
+    
+    // Extract events
+    const events = extractEventsFromParsedData(parsedData, { name: testFile.getName() }, logSheet);
+    console.log(`Extracted ${events.length} events`);
+    
+    // Examine the first event
+    if (events.length > 0) {
+      const firstEvent = events[0];
+      console.log('First event details:');
+      console.log(`- Date: ${firstEvent.date ? firstEvent.date.toDateString() : 'No date'}`);
+      console.log(`- Content items: ${firstEvent.cleanedResults.length}`);
+      console.log('- First 5 content items:');
+      
+      firstEvent.cleanedResults.slice(0, 5).forEach((item, index) => {
+        console.log(`  ${index + 1}. Type: ${item.type}, Content: ${item.content.substring(0, 100)}...`);
+      });
+      
+      // Test formatting of just the first event
+      console.log('Testing Gemini formatting of first event...');
+      const formatted = await formatWithGeminiAPI(firstEvent.cleanedResults, parsedData.seriesName, logSheet);
+      console.log('Formatted result (first 500 chars):');
+      console.log(formatted.substring(0, 500));
+    }
+    
+  } catch (error) {
+    console.error('Error in test:', error);
+    logProgress(logSheet, `Test error: ${error.message}`);
   }
 }
