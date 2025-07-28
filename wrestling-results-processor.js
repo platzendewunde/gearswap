@@ -283,6 +283,7 @@ function onOpen() {
     .addItem('Test Date Extraction', 'testDateExtraction')
     .addItem('Test Event Extraction', 'testEventExtraction')
     .addItem('Test Prose Filtering', 'testProseFiltering')
+    .addItem('Test Wrestler Lines', 'testWrestlerLineFormatting')
     .addItem('Test Special Results', 'testSpecialResultFormatting')
     .addToUi();
 }
@@ -901,7 +902,11 @@ IMPORTANT:
    - For Double Count Out: Use ▲ for one wrestler per team (the involved participants)
    - For Time Limit Draw: Use △ for all participants
    - For Double Pinfall: Use △ for all participants
-10. "vs" on its own line between teams (replace any scores like (3-2) or (5-4) with "vs")
+10. **WRESTLER LINE FORMATTING**:
+   - Each wrestler on their own individual line
+   - "vs" on its own separate line between teams
+   - NEVER put wrestlers on same line as "vs"
+   - Replace any scores like (3-2) or (5-4) with just "vs"
 11. Match time and finish move in parentheses: (time finish)
 12. For championships: ⭐︎ symbol for title defense notes
 13. Special matches (Captain's Fall, Hardcore, etc.) clearly labeled
@@ -947,6 +952,26 @@ ${contentText}
 - △ symbol is ONLY for: Time Limit Draw, Double Pinfall, Draw
 - ⭕️ symbol is ONLY for: Actual winners (pins, submissions, etc.)
 - ❌ symbol is ONLY for: Actual losers (pinned, submitted, etc.)
+
+**CRITICAL WRESTLER LINE FORMATTING EXAMPLES:**
+CORRECT Singles Match Format:
+② El Numero Uno Block C:
+SUWA▲
+vs
+Darkness Dragon▲
+(8:01 Double Count Out)
+
+WRONG Format (DO NOT DO THIS):
+SUWA▲ vs Darkness Dragon▲
+
+CORRECT Tag Team Format:
+① Tag Team Match
+Dragon Kid⭕️
+Genki Horiguchi
+vs
+Darkness Dragon
+CIMA❌
+(16:45 Ultra Hurricanrana)
 
 **DO NOT CONFUSE THESE SYMBOLS:**
 - If it says "No Contest" anywhere → use ▲ 
@@ -1090,6 +1115,17 @@ function formatDragonGateFallback(cleanedResults, seriesName) {
         // Process match participants and results
         if (content.includes('vs') && content.length <= 5) {
           formatted.push('vs');
+        } else if (content.includes(' vs ')) {
+          // Split wrestlers that are on the same line with vs
+          const parts = content.split(' vs ');
+          for (let i = 0; i < parts.length; i++) {
+            if (parts[i].trim()) {
+              formatted.push(parts[i].trim());
+            }
+            if (i < parts.length - 1) {
+              formatted.push('vs');
+            }
+          }
         } else if (content.match(/^\([0-9:]+.*\)$/)) {
           // Match time and finish
           formatted.push(content);
@@ -1568,6 +1604,67 @@ function testProseFiltering() {
   console.log('\n=== SUMMARY ===');
   console.log('✅ Lines marked KEEP should be wrestling content (events, matches, results)');
   console.log('❌ Lines marked FILTER should be prose/narrative content');
+}
+
+/**
+ * Test function to verify wrestler line formatting
+ */
+async function testWrestlerLineFormatting() {
+  console.log('Testing wrestler line formatting...');
+  
+  const logSheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+  
+  const testData = [
+    { type: 'content', content: '② El Numero Uno Block C:' },
+    { type: 'content', content: 'SUWA vs Darkness Dragon' },
+    { type: 'content', content: '(8:01 Double Count Out)' },
+    { type: 'separator', content: '——' },
+    { type: 'content', content: '③ El Numero Uno Block B:' },
+    { type: 'content', content: 'Super Shisa vs Masaaki Mochizuki' },
+    { type: 'content', content: '(8:33 Shisa Clutch II)' }
+  ];
+  
+  try {
+    const result = await formatWithGeminiAPI(testData, 'Wrestler Line Test', logSheet);
+    console.log('Formatted result:');
+    console.log(result);
+    
+    // Check for correct line formatting
+    const lines = result.split('\n');
+    let hasCorrectFormat = false;
+    let hasIncorrectFormat = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Check for incorrect format (wrestlers on same line as vs)
+      if (line.match(/\w+.*vs.*\w+/)) {
+        hasIncorrectFormat = true;
+        console.log(`❌ Found incorrect format: ${line}`);
+      }
+      
+      // Check for correct format (vs on its own line)
+      if (line === 'vs' && i > 0 && i < lines.length - 1) {
+        const prevLine = lines[i - 1].trim();
+        const nextLine = lines[i + 1].trim();
+        if (prevLine && nextLine && !prevLine.includes('vs') && !nextLine.includes('vs')) {
+          hasCorrectFormat = true;
+          console.log(`✅ Found correct format: ${prevLine} / vs / ${nextLine}`);
+        }
+      }
+    }
+    
+    if (hasCorrectFormat && !hasIncorrectFormat) {
+      console.log('✅ All wrestler lines formatted correctly');
+    } else if (hasIncorrectFormat) {
+      console.log('❌ Found incorrect wrestler line formatting');
+    } else {
+      console.log('⚠️ Could not determine formatting quality');
+    }
+    
+  } catch (error) {
+    console.error('❌ Test failed:', error.message);
+  }
 }
 
 /**
