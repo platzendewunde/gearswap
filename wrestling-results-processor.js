@@ -281,6 +281,7 @@ function onOpen() {
     .addItem('Test Gemini API', 'testGeminiAPI')
     .addItem('Test Year Parsing', 'testYearParsing')
     .addItem('Test Date Extraction', 'testDateExtraction')
+    .addItem('Test Prose Filtering', 'testProseFiltering')
     .addItem('Test Special Results', 'testSpecialResultFormatting')
     .addToUi();
 }
@@ -1157,24 +1158,57 @@ function parseMarkdownFile(file, logSheet) {
  * @returns {boolean} True if the line is prose and should be removed
  */
 function isProseContent(line) {
-  // Skip prose paragraphs - these are usually longer narrative text
+  // NEVER filter out event headers and important structural content
+  if (
+    // Event headers with dates and venues (like **1/31/2004 Tokyo, Korakuen Hall**)
+    line.match(/^\*\*.*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}.*\*\*/) ||
+    // Bold event headers
+    line.match(/^\*\*.*Attendance.*\*\*/) ||
+    // Any line with bold formatting that contains dates or venues
+    line.match(/^\*\*.*\*\*/) ||
+    // Lines starting with match numbers or circled numbers
+    line.match(/^[①②③④⑤⑥⑦⑧⑨⑩\d]+[\.\)]\s/) ||
+    // Lines with dates (any format)
+    line.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/) ||
+    line.match(/(January|February|March|April|May|June|July|August|September|October|November|December)/i) ||
+    // Lines with attendance info
+    line.match(/attendance/i) ||
+    // Lines with match types
+    line.match(/(Singles|Tag Team|Battle Royal|Championship|Elimination|Hardcore|Street Fight|Ladder|Cage) Match/i) ||
+    // Lines with vs
+    line.match(/\bvs\b/) ||
+    // Lines with match times and results
+    line.match(/\(\d+:\d+/) ||
+    // Lines with wrestler win/loss symbols
+    line.match(/[⭕❌▲△]/) ||
+    // Lines with title defense info
+    line.match(/\*\d+(st|nd|rd|th) Defense/i) ||
+    // Short lines (likely wrestler names or match info)
+    line.length <= 50
+  ) {
+    return false; // Don't filter these out
+  }
+  
+  // Filter out actual prose content
   return (
-    // Skip long paragraphs (likely prose)
-    line.length > 200 ||
-    // Skip sentences that start with names and contain storyline words
+    // Very long paragraphs (likely prose)
+    line.length > 250 ||
+    // Sentences that start with names and contain storyline words
     line.match(/^[A-Z][a-z]+ (said|talked|admitted|revealed|challenged|asked|thanked|promised|considered|hoped|began|interrupted|invited|appeared|changed|gathered)/i) ||
-    // Skip interview/backstage segments
+    // Interview/backstage segments
     line.match(/^(An interview|A conversation|The interview|Backstage)/i) ||
-    // Skip paragraphs about storylines, character development, etc.
+    // Paragraphs about storylines, character development, etc.
     line.match(/^(After|Before|During|Following) (the match|match \d+)/i) ||
-    // Skip narrative text that doesn't contain match data or dates
-    (line.length > 100 && 
+    // Long narrative text without wrestling-specific content
+    (line.length > 150 && 
      !line.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/) && 
      !line.match(/(January|February|March|April|May|June|July|August|September|October|November|December)/i) &&
-     !line.match(/^\d+\./) && // Not a match listing
-     !line.match(/\*\d+(st|nd|rd|th) Defense/i) && // Not a title defense note
-     !line.match(/vs/) && // Not a match participant line
-     !line.match(/\(\d+:\d+/) // Not a match time/result
+     !line.match(/match/i) &&
+     !line.match(/vs/) &&
+     !line.match(/attendance/i) &&
+     !line.match(/hall|center|arena|gym/i) &&
+     !line.match(/\(\d+:\d+/) &&
+     !line.match(/[⭕❌▲△]/)
     )
   );
 }
@@ -1346,6 +1380,48 @@ function testDateExtraction() {
 }
 
 
+
+/**
+ * Test function to verify prose filtering
+ */
+function testProseFiltering() {
+  console.log('Testing prose filtering...');
+  
+  const testLines = [
+    // These should NOT be filtered (wrestling content)
+    '**1/31/2004 Tokyo, Korakuen Hall - 2350 Attendance**',
+    '**1/29/2004 Hiroshima, Saeki-ku Sports Center - 800 Attendance**',
+    '① Singles Match',
+    'Dragon Kid⭕️',
+    'vs',
+    'CIMA❌',
+    '(15:30 Ultra Hurricanrana)',
+    '4/26/2001 Gifu Industrial Hall 1050 Attendance',
+    'May 12th, 2001',
+    'Tag Team Match',
+    '⭐︎1st successful defense',
+    
+    // These SHOULD be filtered (prose content)
+    'After the match, Dragon Kid talked about his feelings regarding the upcoming tournament and how he hoped to make his mark in the promotion while also considering his future options in the wrestling business.',
+    'An interview was conducted backstage where the wrestler discussed his strategy.',
+    'The interview revealed that CIMA had been planning this for weeks.',
+    'Following the main event, there was a lengthy celebration as fans cheered for their favorite wrestlers and the promotion announced several upcoming shows for the next month.',
+    'Backstage, several wrestlers gathered to discuss the recent developments in their ongoing storylines and character arcs.'
+  ];
+  
+  console.log('\n=== TESTING PROSE FILTERING ===');
+  testLines.forEach((line, index) => {
+    const isFiltered = isProseContent(line);
+    const shouldKeep = !isFiltered;
+    const linePreview = line.length > 50 ? line.substring(0, 50) + '...' : line;
+    
+    console.log(`${index + 1}. ${shouldKeep ? '✅ KEEP' : '❌ FILTER'}: ${linePreview}`);
+  });
+  
+  console.log('\n=== SUMMARY ===');
+  console.log('✅ Lines marked KEEP should be wrestling content (events, matches, results)');
+  console.log('❌ Lines marked FILTER should be prose/narrative content');
+}
 
 /**
  * Test function to verify special result formatting
