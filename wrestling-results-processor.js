@@ -301,6 +301,8 @@ function onOpen() {
     .addItem('Test Date Extraction', 'testDateExtraction')
     .addItem('Test Event Extraction', 'testEventExtraction')
     .addItem('Test Chronological Sort', 'testChronologicalSorting')
+    .addItem('Test Year Filtering', 'testYearFiltering')
+    .addItem('Test Output Formatting', 'testOutputFormatting')
     .addItem('Test Prose Filtering', 'testProseFiltering')
     .addItem('Test Series Headers', 'testSeriesHeaders')
     .addItem('Test Wrestler Lines', 'testWrestlerLineFormatting')
@@ -396,6 +398,13 @@ async function processAllFiles() {
       
       for (const event of allEvents) {
         try {
+          // Validate event year matches target year
+          const eventYear = event.date ? event.date.getFullYear() : null;
+          if (eventYear && eventYear !== year) {
+            logProgress(logSheet, `⚠️ Skipping event from ${event.fileName} - wrong year (${eventYear} vs ${year})`);
+            continue;
+          }
+          
           logProgress(logSheet, `Processing event from ${event.fileName}: ${event.seriesName}`);
           
           // Check if this is a new series
@@ -934,6 +943,7 @@ IMPORTANT:
 - IGNORE any dates in YAML frontmatter (WordPress upload dates)
 - Sort ALL shows chronologically by actual show date
 - Focus on formatting individual event content only
+- DO NOT add separators (——) between matches - these are handled separately
 
 **CRITICAL FORMATTING RULES:**
 1. **NO SERIES HEADERS**: Do not include any ## headers in the output - only format the event content
@@ -1485,6 +1495,8 @@ function appendEventToDocument(doc, formattedContent, logSheet) {
     
     // Add separator after event
     body.appendParagraph('');
+    body.appendParagraph('——');
+    body.appendParagraph('');
     
   } catch (error) {
     logProgress(logSheet, `ERROR appending event content: ${error.message}`);
@@ -1940,5 +1952,161 @@ async function testSpecialResultFormatting() {
     
   } catch (error) {
     console.error('❌ Test failed:', error.message);
+  }
+}
+
+/**
+ * Test function to verify year filtering and date consistency
+ */
+async function testYearFiltering() {
+  console.log('Testing year filtering and date consistency...');
+  
+  const logSheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+  
+  // Test with mixed year data
+  const testEvents = [
+    {
+      fileName: 'test2002.md',
+      seriesName: 'Test Series 2002',
+      date: new Date(2002, 4, 15), // May 15, 2002
+      cleanedResults: [
+        { type: 'content', content: '**May 15th, 2002 - Tokyo, Korakuen Hall**' }
+      ]
+    },
+    {
+      fileName: 'test2000.md', 
+      seriesName: 'Test Series 2000',
+      date: new Date(2000, 2, 27), // March 27, 2000
+      cleanedResults: [
+        { type: 'content', content: '**March 27th, 2000 - Niigata, Welfare Hall**' }
+      ]
+    },
+    {
+      fileName: 'test2002b.md',
+      seriesName: 'Test Series 2002 Part 2', 
+      date: new Date(2002, 9, 14), // October 14, 2002
+      cleanedResults: [
+        { type: 'content', content: '**October 14th, 2002 - Shimane, Matsue**' }
+      ]
+    }
+  ];
+  
+  const targetYear = 2002;
+  let validEvents = 0;
+  let filteredEvents = 0;
+  
+  console.log(`Testing year filtering for target year: ${targetYear}`);
+  
+  for (const event of testEvents) {
+    const eventYear = event.date ? event.date.getFullYear() : null;
+    
+    if (eventYear && eventYear !== targetYear) {
+      console.log(`❌ Would filter: ${event.fileName} (year ${eventYear})`);
+      filteredEvents++;
+    } else {
+      console.log(`✅ Would include: ${event.fileName} (year ${eventYear})`);
+      validEvents++;
+    }
+  }
+  
+  console.log(`\nResults: ${validEvents} included, ${filteredEvents} filtered`);
+  
+  if (validEvents === 2 && filteredEvents === 1) {
+    console.log('✅ Year filtering test passed!');
+  } else {
+    console.log('❌ Year filtering test failed!');
+  }
+}
+
+/**
+ * Test function to debug output formatting issues
+ */
+async function testOutputFormatting() {
+  console.log('Testing output formatting...');
+  
+  const logSheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+  
+  // Create test events with proper structure
+  const testEvents = [
+    {
+      fileName: 'test1.md',
+      seriesName: 'Test Series A',
+      date: new Date(2002, 2, 15), // March 15, 2002
+      cleanedResults: [
+        { type: 'content', content: '**March 15th, 2002**' },
+        { type: 'content', content: 'Tokyo, Korakuen Hall' },
+        { type: 'content', content: 'Attendance: 1800' },
+        { type: 'content', content: '① Singles Match' },
+        { type: 'content', content: 'Wrestler A⭕️ vs Wrestler B❌' },
+        { type: 'content', content: '(10:30 Special Move)' }
+      ]
+    },
+    {
+      fileName: 'test1.md',
+      seriesName: 'Test Series A',
+      date: new Date(2002, 2, 22), // March 22, 2002
+      cleanedResults: [
+        { type: 'content', content: '**March 22nd, 2002**' },
+        { type: 'content', content: 'Osaka, Prefectural Gym' },
+        { type: 'content', content: 'Attendance: 1200' },
+        { type: 'content', content: '① Tag Team Match' },
+        { type: 'content', content: 'Team A⭕️ vs Team B❌' },
+        { type: 'content', content: '(15:45 Double Team Move)' }
+      ]
+    },
+    {
+      fileName: 'test2.md',
+      seriesName: 'Test Series B',
+      date: new Date(2002, 3, 5), // April 5, 2002
+      cleanedResults: [
+        { type: 'content', content: '**April 5th, 2002**' },
+        { type: 'content', content: 'Nagoya, Congress Center' },
+        { type: 'content', content: 'Attendance: 2000' },
+        { type: 'content', content: '① Championship Match' },
+        { type: 'content', content: 'Champion⭕️ vs Challenger❌' },
+        { type: 'content', content: '(20:15 Finishing Move)' }
+      ]
+    }
+  ];
+  
+  console.log('Testing individual event formatting...');
+  
+  try {
+    let currentSeries = null;
+    
+    for (let i = 0; i < testEvents.length; i++) {
+      const event = testEvents[i];
+      
+      console.log(`\n--- Processing Event ${i + 1} ---`);
+      console.log(`Series: ${event.seriesName}`);
+      console.log(`Date: ${event.date.toDateString()}`);
+      
+      // Check if this is a new series
+      const isNewSeries = currentSeries !== event.seriesName;
+      console.log(`Is new series: ${isNewSeries}`);
+      
+      if (isNewSeries) {
+        console.log(`🏷️ Would add series header: ${event.seriesName}`);
+        currentSeries = event.seriesName;
+      }
+      
+      // Format the event content
+      const formattedContent = await formatWithGeminiAPI(event.cleanedResults, '', logSheet);
+      
+      console.log(`📄 Formatted content (first 200 chars):`);
+      console.log(formattedContent.substring(0, 200) + '...');
+      
+      // Check for separators in formatted content
+      const lines = formattedContent.split('\n');
+      const separatorCount = lines.filter(line => line.trim() === '——').length;
+      console.log(`🔍 Separators found in formatted content: ${separatorCount}`);
+      
+      console.log(`📤 Would append event to document with separator`);
+    }
+    
+    console.log('\n✅ Output formatting test completed');
+    
+  } catch (error) {
+    console.error('❌ Output formatting test failed:', error.message);
   }
 }
