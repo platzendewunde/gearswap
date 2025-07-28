@@ -393,37 +393,40 @@ async function processAllFiles() {
         logProgress(logSheet, `${index + 1}. ${dateStr} - ${event.fileName} - ${event.seriesName}`);
       });
       
-      // Process all events in chronological order, tracking series changes
+      // Group events by series and process each series as a unit
+      const eventsBySeries = {};
+      allEvents.forEach(event => {
+        if (!eventsBySeries[event.seriesName]) {
+          eventsBySeries[event.seriesName] = [];
+        }
+        eventsBySeries[event.seriesName].push(event);
+      });
+
+      // Process each series
       let processedCount = 0;
-      let currentSeries = null;
-      
-      for (const event of allEvents) {
+      for (const seriesName of Object.keys(eventsBySeries)) {
+        const seriesEvents = eventsBySeries[seriesName];
+        
         try {
-          // Note: Year filtering temporarily disabled - all 2002 events should be processed
+          logProgress(logSheet, `Processing series: ${seriesName} (${seriesEvents.length} events)`);
           
-          logProgress(logSheet, `Processing event from ${event.fileName}: ${event.seriesName}`);
-          
-          // Check if this is a new series
-          const isNewSeries = currentSeries !== event.seriesName;
-          
-          // Format this individual event using Gemini API (without series header)
-          const formattedContent = await formatWithGeminiAPI(event.cleanedResults, '', logSheet);
-          
-          if (isNewSeries) {
-            // Add series header for new series
-            appendSeriesHeader(yearlyDoc, event.seriesName, logSheet);
-            currentSeries = event.seriesName;
+          // Combine all events in this series
+          const combinedResults = [];
+          for (const event of seriesEvents) {
+            combinedResults.push(...event.cleanedResults);
           }
           
-          // Append event content to yearly document (without series name)
-          appendEventToDocument(yearlyDoc, formattedContent, logSheet);
+          // Format the entire series using Gemini API
+          const formattedContent = await formatWithGeminiAPI(combinedResults, seriesName, logSheet);
           
-          processedCount++;
-          logProgress(logSheet, `✅ Successfully processed event (${processedCount}/${allEvents.length})`);
+          // Append to yearly document
+          appendSeriesToDocument(yearlyDoc, seriesName, formattedContent, logSheet);
           
-        } catch (eventError) {
-          logProgress(logSheet, `❌ FAILED to process event from ${event.fileName}: ${eventError.message}`);
-          // Continue processing other events despite individual failures
+          processedCount += seriesEvents.length;
+          logProgress(logSheet, `✅ Successfully processed series ${seriesName} (${seriesEvents.length} events)`);
+          
+        } catch (seriesError) {
+          logProgress(logSheet, `❌ FAILED to process series ${seriesName}: ${seriesError.message}`);
         }
       }
       
@@ -880,6 +883,8 @@ async function formatWithGeminiAPI(cleanedResults, seriesName, logSheet) {
     const prompt = `You are formatting Dragon Gate professional wrestling results. Please format the following wrestling event data to match this EXACT structure and format:
 
 **REQUIRED FORMAT EXAMPLE:**
+## El Numero Uno Special 2001
+
 May 12th, 2001
 Tokyo, Korakuen Hall  
 Attendance: 2100
@@ -935,14 +940,16 @@ TARU❌
 - Replace any team scores like "Team A (3-2) Team B" with "Team A vs Team B"
 
 IMPORTANT: 
-- DO NOT include series name headers (##) in the output - these are handled separately
+- Extract series name from YAML title field, place as ## header before first show only
 - IGNORE any dates in YAML frontmatter (WordPress upload dates)
 - Sort ALL shows chronologically by actual show date
-- Focus on formatting individual event content only
-- DO NOT add separators (——) between matches - these are handled separately
+- Series header appears once before first show, not repeated
 
 **CRITICAL FORMATTING RULES:**
-1. **NO SERIES HEADERS**: Do not include any ## headers in the output - only format the event content
+1. **SERIES NAME**: Use title from YAML frontmatter as ## Header 2, ignore WordPress upload date
+   - YAML frontmatter format: ---\ntitle: "Series Name"\ndate: 2015-08-19\n---
+   - IGNORE the date field (WordPress upload date)
+   - Use title field as series header before FIRST show only
 2. **DATE FORMAT**: Must be "Month DDth, YYYY" (January 16th, 2000)
    - Convert from any format (4/26/2001, 2015-08-19, 11/25/2001, etc.)
    - Use full month names and proper ordinals (1st, 2nd, 3rd, 4th, etc.)
@@ -1489,9 +1496,7 @@ function appendEventToDocument(doc, formattedContent, logSheet) {
       }
     }
     
-    // Add separator after event
-    body.appendParagraph('');
-    body.appendParagraph('——');
+    // Add spacing after event content
     body.appendParagraph('');
     
   } catch (error) {
