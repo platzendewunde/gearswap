@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wrestling Results Processor - Download Files</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .file-section { margin: 20px 0; border: 1px solid #ddd; border-radius: 5px; }
+        .file-header { background: #f5f5f5; padding: 10px; font-weight: bold; border-bottom: 1px solid #ddd; }
+        .file-content { padding: 15px; }
+        textarea { width: 100%; height: 300px; font-family: monospace; font-size: 12px; }
+        .copy-btn { background: #007cba; color: white; padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; }
+        .copy-btn:hover { background: #005a87; }
+        .instructions { background: #e7f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .folder-structure { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Wrestling Results Processor - Modular Edition</h1>
+    
+    <div class="instructions">
+        <h2>📥 How to Download and Setup</h2>
+        <ol>
+            <li><strong>Save this HTML page</strong> to your computer (Right-click → Save As → "download_files.html")</li>
+            <li><strong>Create project folder</strong>: Create a new folder called <code>wrestling-results-processor</code></li>
+            <li><strong>Copy each file</strong>: For each file below, copy the content and save it with the exact filename shown</li>
+            <li><strong>Create folder structure</strong>: Create the subfolders as shown in the structure below</li>
+            <li><strong>Run setup</strong>: Follow the setup instructions in the README</li>
+        </ol>
+    </div>
+
+    <div class="folder-structure">
+        <h3>📁 Required Folder Structure</h3>
+        <pre>
+wrestling-results-processor/
+├── package.json
+├── appsscript.json
+├── .clasprc.json
+├── README.md
+├── LOCAL_SETUP_INSTRUCTIONS.md
+├── MIGRATION_SUMMARY.md
+├── setup.md
+└── src/
+    ├── main.js
+    ├── config.js
+    ├── utils/
+    │   ├── logger.js
+    │   └── date-utils.js
+    ├── parsers/
+    │   └── markdown-parser.js
+    ├── formatters/
+    │   ├── gemini-formatter.js
+    │   └── fallback-formatter.js
+    └── files/
+        └── file-discovery.js
+        </pre>
+    </div>
+
+    <script>
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            element.select();
+            document.execCommand('copy');
+            alert('Content copied to clipboard!');
+        }
+    </script>
+
+</body>
+</html>
