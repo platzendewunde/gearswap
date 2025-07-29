@@ -1,0 +1,35 @@
+{
+  "name": "wrestling-results-processor",
+  "version": "2.0.0",
+  "description": "Modular Google Apps Script project for processing wrestling results from Markdown to Google Docs",
+  "scripts": {
+    "login": "clasp login",
+    "create": "clasp create --title 'Wrestling Results Processor' --type standalone",
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "deploy": "clasp deploy",
+    "open": "clasp open",
+    "logs": "clasp logs",
+    "version": "clasp version",
+    "versions": "clasp versions",
+    "status": "clasp status",
+    "setup": "npm run login && npm run create && npm run push"
+  },
+  "keywords": [
+    "google-apps-script",
+    "wrestling",
+    "markdown",
+    "document-processing",
+    "automation"
+  ],
+  "author": "Wrestling Results Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@google/clasp": "^3.0.6",
+    "@types/google-apps-script": "^1.0.83",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
