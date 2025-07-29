@@ -10,8 +10,8 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
-from .markdown_parser import ContentItem
-from .date_parser import DateParser, ExtractedDate
+from markdown_parser import ContentItem
+from date_parser import DateParser, ExtractedDate
 
 
 @dataclass
@@ -61,6 +61,7 @@ class FormatConverter:
             (r'singles?\s+match', 'Singles Match'),
             (r'tag\s+team\s+match', 'Tag Team Match'),
             (r'(\d+)-man\s+tag\s+match', lambda m: f'{m.group(1)}-Man Tag Match'),
+            (r'(\d+)\s+way\s+tag\s+match', lambda m: f'{m.group(1)} Way Tag Match'),
             (r'battle\s+royal', 'Battle Royal'),
             (r'championship\s+match', 'Championship Match'),
             (r'elimination\s+match', 'Elimination Match'),
@@ -79,6 +80,7 @@ class FormatConverter:
             (r'disqualification', 'Disqualification'),
             (r'count\s+out', 'Count Out'),
             (r'submission', 'Submission'),
+            (r'dq', 'Disqualification'),
         ]
     
     def convert_to_dragon_gate_format(self, content_items: List[ContentItem], series_name: str) -> str:
@@ -138,7 +140,6 @@ class FormatConverter:
         """Extract wrestling events from content items"""
         events = []
         current_event = None
-        current_match_number = 0
         
         i = 0
         while i < len(content_items):
@@ -153,15 +154,33 @@ class FormatConverter:
                 
                 # Start new event
                 current_event = self._parse_event_header(item, dates[0])
-                current_match_number = 0
                 
             elif current_event and self._is_match_line(item.content):
-                # Parse match
-                match, consumed_lines = self._parse_match(content_items[i:], current_match_number + 1)
-                if match:
-                    current_event.matches.append(match)
-                    current_match_number += 1
-                    i += consumed_lines - 1  # Skip consumed lines
+                # Parse match - collect all related lines
+                match_content = []
+                j = i
+                
+                # Collect lines that belong to this match
+                while j < len(content_items):
+                    line = content_items[j].content.strip()
+                    if not line:
+                        j += 1
+                        continue
+                    
+                    # Stop if we hit another match or event
+                    if j > i and (self._is_match_line(line) or self.date_parser.extract_dates_from_text(line)):
+                        break
+                    
+                    match_content.append(line)
+                    j += 1
+                
+                # Parse the collected match content
+                if match_content:
+                    match = self._parse_match_from_lines(match_content)
+                    if match:
+                        current_event.matches.append(match)
+                
+                i = j - 1  # Continue from where we left off
             
             i += 1
         
@@ -186,13 +205,18 @@ class FormatConverter:
         content = item.content
         
         # Look for attendance pattern
-        attendance_match = re.search(r'(\d+)\s+attendance', content, re.IGNORECASE)
+        attendance_match = re.search(r'(\d+)\s*$', content)
+        if not attendance_match:
+            attendance_match = re.search(r'attendance\s*:?\s*(\d+)', content, re.IGNORECASE)
         if attendance_match:
             event.attendance = int(attendance_match.group(1))
-            content = re.sub(r'\s*\d+\s+attendance', '', content, flags=re.IGNORECASE)
+            content = re.sub(r'\s*-?\s*\d+\s*$', '', content)
+            content = re.sub(r'attendance\s*:?\s*\d+', '', content, flags=re.IGNORECASE)
         
         # Remove date from content to get venue
-        content = re.sub(date.original_text, '', content).strip()
+        content = re.sub(re.escape(date.original_text), '', content).strip()
+        content = re.sub(r'^-\s*', '', content).strip()
+        content = re.sub(r'\s*-\s*$', '', content).strip()
         
         # Parse city, venue format
         if ',' in content:
@@ -206,8 +230,12 @@ class FormatConverter:
     
     def _is_match_line(self, content: str) -> bool:
         """Check if a line represents the start of a match"""
-        # Look for circled numbers or match type indicators
+        # Look for circled numbers
         if re.match(r'^[①②③④⑤⑥⑦⑧⑨⑩]', content):
+            return True
+        
+        # Look for numbered matches
+        if re.match(r'^\d+\.\s', content):
             return True
         
         # Look for match type keywords
@@ -217,45 +245,28 @@ class FormatConverter:
         
         return False
     
-    def _parse_match(self, content_items: List[ContentItem], match_number: int) -> Tuple[Optional[WrestlingMatch], int]:
-        """
-        Parse a match from content items
+    def _parse_match_from_lines(self, match_lines: List[str]) -> Optional[WrestlingMatch]:
+        """Parse a match from a list of content lines"""
+        if not match_lines:
+            return None
         
-        Returns:
-            Tuple of (match or None, number of lines consumed)
-        """
-        if not content_items:
-            return None, 0
+        first_line = match_lines[0]
+        all_content = " ".join(match_lines)
         
-        consumed = 1
-        first_line = content_items[0].content
+        # Extract match number
+        match_number = 1
+        number_match = re.match(r'^(\d+)\.', first_line)
+        if number_match:
+            match_number = int(number_match.group(1))
         
         # Determine match type
-        match_type = self._determine_match_type(first_line)
+        match_type = self._determine_match_type_from_content(all_content)
         
-        # Collect match lines until we hit another match or event
-        match_lines = [first_line]
-        
-        for i in range(1, len(content_items)):
-            line = content_items[i].content
-            
-            # Stop if we hit another match or event
-            if (self._is_match_line(line) or 
-                self.date_parser.extract_dates_from_text(line) or
-                line.strip() == "" and i < len(content_items) - 1 and 
-                (self._is_match_line(content_items[i + 1].content) or 
-                 self.date_parser.extract_dates_from_text(content_items[i + 1].content))):
-                break
-            
-            if line.strip():
-                match_lines.append(line)
-            consumed += 1
-        
-        # Parse participants and result
-        participants, result_info = self._parse_match_participants_and_result(match_lines)
+        # Parse participants and results
+        participants, result_info = self._parse_participants_and_result(all_content)
         
         if not participants:
-            return None, consumed
+            return None
         
         match = WrestlingMatch(
             match_number=match_number,
@@ -264,52 +275,53 @@ class FormatConverter:
             result=result_info.get('result', ''),
             time=result_info.get('time'),
             finish=result_info.get('finish'),
-            winner_symbols=self._determine_winner_symbols(participants, result_info)
+            winner_symbols=self._determine_winner_symbols_from_content(all_content, participants)
         )
         
-        return match, consumed
+        return match
     
-    def _determine_match_type(self, line: str) -> str:
-        """Determine match type from line content"""
-        # Remove circled number if present
-        clean_line = re.sub(r'^[①②③④⑤⑥⑦⑧⑨⑩]\s*', '', line)
+    def _determine_match_type_from_content(self, content: str) -> str:
+        """Determine match type from content"""
+        # Remove match number
+        clean_content = re.sub(r'^\d+\.\s*', '', content)
         
         # Check for explicit match types
         for pattern, match_type in self.match_type_patterns:
             if callable(match_type):
-                match = re.search(pattern, clean_line, re.IGNORECASE)
+                match = re.search(pattern, clean_content, re.IGNORECASE)
                 if match:
                     return match_type(match)
-            elif re.search(pattern, clean_line, re.IGNORECASE):
+            elif re.search(pattern, clean_content, re.IGNORECASE):
                 return match_type
         
-        # Default based on common results that aren't match types
-        if re.search(r'^(No Contest|Time Limit Draw|Double Count Out|Disqualification|Draw)$', clean_line, re.IGNORECASE):
-            return 'Singles Match'  # Most common default
+        # Count participants to guess match type
+        # Look for wrestler names (assuming they have capital letters)
+        wrestler_names = re.findall(r'\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\b', content)
+        unique_wrestlers = list(set(wrestler_names))
         
-        # If it already contains "Match", keep as is
-        if 'Match' in clean_line:
-            return clean_line
-        
-        return 'Singles Match'  # Final fallback
+        if len(unique_wrestlers) <= 2:
+            return 'Singles Match'
+        elif len(unique_wrestlers) <= 4:
+            return 'Tag Team Match'
+        elif len(unique_wrestlers) > 8:
+            return 'Battle Royal'
+        else:
+            return '6-Man Tag Match'
     
-    def _parse_match_participants_and_result(self, match_lines: List[str]) -> Tuple[List[str], Dict[str, str]]:
-        """Parse participants and match result from match lines"""
+    def _parse_participants_and_result(self, content: str) -> Tuple[List[str], Dict[str, str]]:
+        """Parse participants and match result from content"""
         participants = []
         result_info = {}
         
-        # Join all lines and parse
-        content = " ".join(match_lines)
+        # Remove match number and type info
+        clean_content = re.sub(r'^\d+\.\s*', '', content)
+        clean_content = re.sub(r'(Singles|Tag Team|Championship|Battle Royal|Elimination)\s+Match\s*:?\s*', '', clean_content, flags=re.IGNORECASE)
         
-        # Remove match type and number
-        content = re.sub(r'^[①②③④⑤⑥⑦⑧⑨⑩]\s*', '', content)
-        content = re.sub(r'(Singles|Tag Team|Championship|Battle Royal|Elimination) Match\s*', '', content, flags=re.IGNORECASE)
-        
-        # Extract time and finish (in parentheses at end)
-        time_match = re.search(r'\(([^)]*)\)$', content)
+        # Extract time and finish (in parentheses)
+        time_match = re.search(r'\(([^)]*)\)', clean_content)
         if time_match:
             time_info = time_match.group(1)
-            content = content[:time_match.start()].strip()
+            clean_content = clean_content[:time_match.start()].strip()
             
             # Parse time and finish
             time_parts = time_info.split(' ', 1)
@@ -320,42 +332,56 @@ class FormatConverter:
             else:
                 result_info['finish'] = time_info
         
-        # Split by "vs" to get teams
-        if ' vs ' in content:
-            teams = content.split(' vs ')
-            for team in teams:
-                # Split team members (assume separated by &, and, or commas)
-                members = re.split(r'\s*[&,]\s*|\s+and\s+', team.strip())
-                participants.extend([m.strip() for m in members if m.strip()])
-        else:
-            # Single line of participants
-            participants = re.split(r'\s*[&,]\s*|\s+and\s+|\s+vs\s+', content)
-            participants = [p.strip() for p in participants if p.strip()]
+        # Look for wrestler names - they typically have capital letters and are proper nouns
+        # Also handle symbols like {W}, {L}, etc.
+        wrestler_pattern = r'\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*(?:\{[WL]\})?'
+        potential_wrestlers = re.findall(wrestler_pattern, clean_content)
         
-        return participants, result_info
+        # Clean up wrestler names
+        for wrestler in potential_wrestlers:
+            # Remove result markers
+            clean_wrestler = re.sub(r'\{[WL]\}', '', wrestler).strip()
+            if clean_wrestler and len(clean_wrestler) > 1:
+                participants.append(clean_wrestler)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_participants = []
+        for p in participants:
+            if p not in seen:
+                seen.add(p)
+                unique_participants.append(p)
+        
+        return unique_participants, result_info
     
-    def _determine_winner_symbols(self, participants: List[str], result_info: Dict[str, str]) -> Dict[str, str]:
-        """Determine winner/loser symbols for participants"""
+    def _determine_winner_symbols_from_content(self, content: str, participants: List[str]) -> Dict[str, str]:
+        """Determine winner/loser symbols from content"""
         symbols = {}
         
-        # Check for special results
-        finish = result_info.get('finish', '').lower()
-        result = result_info.get('result', '').lower()
+        # Check for special results first
+        lower_content = content.lower()
         
-        if any(special in finish or special in result for special in ['no contest', 'double count out']):
-            # No contest or double count out - all get ▲
+        if any(special in lower_content for special in ['no contest', 'double count out', 'dq']):
+            # No contest type results - all get ▲
             for participant in participants:
                 symbols[participant] = self.symbols['no_contest']
-        elif any(special in finish or special in result for special in ['time limit draw', 'double pinfall', 'draw']):
-            # Draw - all get △
+        elif any(special in lower_content for special in ['time limit draw', 'double pinfall', 'draw']):
+            # Draw type results - all get △
             for participant in participants:
                 symbols[participant] = self.symbols['draw']
         else:
-            # Regular match - need to determine winner/loser
-            # For now, mark first as winner, last as loser (would need more sophisticated logic)
-            if len(participants) >= 2:
-                symbols[participants[0]] = self.symbols['winner']
-                symbols[participants[-1]] = self.symbols['loser']
+            # Look for {W} and {L} markers
+            for participant in participants:
+                if f'{participant}{{W}}' in content or f'{participant}{{w}}' in content:
+                    symbols[participant] = self.symbols['winner']
+                elif f'{participant}{{L}}' in content or f'{participant}{{l}}' in content:
+                    symbols[participant] = self.symbols['loser']
+            
+            # If no explicit markers, assign based on position (first = winner, last = loser)
+            if not any(symbol in symbols.values() for symbol in [self.symbols['winner'], self.symbols['loser']]):
+                if len(participants) >= 2:
+                    symbols[participants[0]] = self.symbols['winner']
+                    symbols[participants[-1]] = self.symbols['loser']
         
         return symbols
     
@@ -371,24 +397,32 @@ class FormatConverter:
         
         lines.append(f"{number} {match.match_type}")
         
-        # Participants with symbols
-        # Group participants into teams (simple split for now)
-        mid_point = len(match.participants) // 2
-        team1 = match.participants[:mid_point] if mid_point > 0 else match.participants[:1]
-        team2 = match.participants[mid_point:] if mid_point > 0 else match.participants[1:]
-        
-        # Format team 1
-        for participant in team1:
-            symbol = match.winner_symbols.get(participant, '')
-            lines.append(f"{participant}{symbol}")
-        
-        # vs separator
-        lines.append("vs")
-        
-        # Format team 2
-        for participant in team2:
-            symbol = match.winner_symbols.get(participant, '')
-            lines.append(f"{participant}{symbol}")
+        # Format participants - try to split into teams intelligently
+        if len(match.participants) <= 2:
+            # Singles match
+            for participant in match.participants:
+                symbol = match.winner_symbols.get(participant, '')
+                lines.append(f"{participant}{symbol}")
+            if len(match.participants) == 2:
+                lines.insert(-1, "vs")  # Insert vs between the two
+        else:
+            # Multi-person match - split in half
+            mid_point = len(match.participants) // 2
+            team1 = match.participants[:mid_point]
+            team2 = match.participants[mid_point:]
+            
+            # Format team 1
+            for participant in team1:
+                symbol = match.winner_symbols.get(participant, '')
+                lines.append(f"{participant}{symbol}")
+            
+            # vs separator
+            lines.append("vs")
+            
+            # Format team 2
+            for participant in team2:
+                symbol = match.winner_symbols.get(participant, '')
+                lines.append(f"{participant}{symbol}")
         
         # Result line
         result_parts = []

@@ -10,10 +10,10 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
-from .markdown_parser import MarkdownParser, ParsedMarkdown, ContentItem
-from .year_extractor import YearExtractor
-from .date_parser import DateParser, ExtractedDate
-from .format_converter import FormatConverter, WrestlingEvent
+from markdown_parser import MarkdownParser, ParsedMarkdown, ContentItem
+from year_extractor import YearExtractor
+from date_parser import DateParser, ExtractedDate
+from format_converter import FormatConverter, WrestlingEvent
 
 
 @dataclass
